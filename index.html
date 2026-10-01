@@ -197,7 +197,7 @@ function renderCal(){
   if (!cities.some(([k])=>k===norm(city))) city = cities[0]?.[0] || "";
   const ws = weeks(), thisMon = iso(mondayOf(new Date()));
   const present = (p,w)=>cityAt(p,w)===city;
-  const taken = new Set(matches.flatMap(m=>[m.person_a,m.person_b]));
+  const taken = new Set(matches.filter(m=>norm(m.city)===city).flatMap(m=>[m.person_a,m.person_b]));
   const members = people.filter(p=>!taken.has(p.id)&&ws.some(w=>cityAt(p,w)===city));
   picked = picked.filter(id=>members.some(p=>p.id===id));
   const pk = picked.map(id=>members.find(p=>p.id===id));
@@ -233,7 +233,7 @@ function renderCal(){
     <div class="bar" style="margin:0">${pk.length?pk.map(p=>`<span class="pair">${esc(p.first_name)} ${esc(p.last_name)}</span>`).join(" + "):'<span class="mut">Aucune personne cochée.</span>'}${pkInfo}
     <button id="mm" ${pk.length===2?"":"disabled"} style="${pk.length===2?"":"opacity:.4"}">Valider ce match</button>
     ${pk.length?'<button class="sec" id="mc">Décocher</button>':""}</div></div>
-  <div class="card"><div class="bar"><b>Calendrier ${yearLabel()}</b><span class="mut">Les personnes déjà matchées n'apparaissent plus ici.</span><span class="leg"><i style="background:var(--ec)"></i>En école ici<i style="background:var(--en)"></i>En entreprise ici</span></div>
+  <div class="card"><div class="bar"><b>Calendrier ${yearLabel()}</b><span class="mut">Les personnes déjà matchées dans cette ville n'apparaissent plus ici.</span><span class="leg"><i style="background:var(--ec)"></i>En école ici<i style="background:var(--en)"></i>En entreprise ici</span></div>
     <div class="cal"><table>${head}${rows}${sum}</table></div></div>`:""}
   </main>`;
   bindHeader();
