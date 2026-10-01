@@ -1,0 +1,1 @@
+{"version":"0.0.1","configurations":[{"name":"planning","runtimeExecutable":"npx","runtimeArgs":["--yes","serve","-l","5177","."],"port":5177}]}

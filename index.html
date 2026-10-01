@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Planning alternants</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--tx:#1e2433;--mut:#6b7385;--bd:#e2e5ee;--ec:#6366f1;--en:#fbbf24;--ok:#16a34a;--okbg:#dcfce7;--bad:#dc2626}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1220;--card:#181c2e;--tx:#e8eaf3;--mut:#9aa1b5;--bd:#2a3047;--okbg:#14351f}}
+*{box-sizing:border-box}body{margin:0;font:14px system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+header{display:flex;gap:10px;align-items:center;padding:10px 20px;border-bottom:1px solid var(--bd);background:var(--card);flex-wrap:wrap}
+h1{font-size:18px;margin:0;margin-right:16px}
+main{padding:16px 20px;max-width:1400px;margin:auto}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:16px}
+input,select,button{font:inherit;padding:7px 10px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx)}
+button{cursor:pointer;background:var(--ec);color:#fff;border:0}button.sec{background:transparent;color:var(--tx);border:1px solid var(--bd)}button.del{background:var(--bad)}
+button.tab{background:transparent;color:var(--mut);border:0;border-bottom:3px solid transparent;border-radius:0;font-weight:600}button.tab.on{color:var(--tx);border-color:var(--ec)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
+label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--mut)}
+.login{max-width:340px;margin:12vh auto}.login form{display:grid;gap:10px}
+.err{color:var(--bad);font-size:13px}.mut{color:var(--mut)}
+.months{display:flex;flex-wrap:wrap;gap:12px;margin:12px 0;user-select:none}
+.month{min-width:110px}.month b{display:block;font-size:12px;margin-bottom:4px;text-transform:capitalize}
+.w{display:inline-flex;align-items:center;justify-content:center;width:30px;height:28px;margin:1px;border-radius:6px;font-size:11px;cursor:pointer;background:var(--en);color:#4a3500}
+.w.ec{background:var(--ec);color:#fff}
+.leg i{display:inline-block;width:12px;height:12px;border-radius:3px;margin:0 4px 0 12px;vertical-align:-1px}
+.list{display:flex;flex-wrap:wrap;gap:8px}.chip{padding:6px 12px;border:1px solid var(--bd);border-radius:999px;cursor:pointer;background:var(--card)}.chip.on{border-color:var(--ec);background:var(--ec);color:#fff}
+.cal{overflow-x:auto}table{border-collapse:collapse;font-size:12px}
+th,td{border:1px solid var(--bd);padding:0}
+th{font-weight:400;color:var(--mut);font-size:10px;padding:2px}th.mo{text-align:left;padding-left:3px;border-left:2px solid var(--mut)}
+td.name{padding:4px 10px;white-space:nowrap;position:sticky;left:0;background:var(--card);min-width:200px;z-index:1}
+td.c{width:24px;height:26px;min-width:24px}
+.p{background:var(--ec)}.pn{background:var(--en)}
+tr.sum td.c{height:14px}.free{background:#bbf7d0}.one{background:#4ade80}.two{background:var(--bad)}
+.pair{display:inline-block;background:var(--okbg);border:1px solid var(--ok);border-radius:999px;padding:5px 14px;margin:3px}
+.pair.part{background:transparent;border-color:var(--bd)}
+.bar{display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const sb = supabase.createClient("https://eeezjlrplslqwnivrmhh.supabase.co",
+"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVlZXpqbHJwbHNscXduaXZybWhoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAwODA2NzYsImV4cCI6MjEwNTY1NjY3Nn0.IdChjbQiWKqWAPXPVGBUEmKZoNa0VR05Ly9cO4O8f5A");
+const $app = document.getElementById("app"), DAY = 864e5;
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const norm = s => (s||"").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+const iso = d => { const z=new Date(d.getTime()-d.getTimezoneOffset()*6e4); return z.toISOString().slice(0,10) };
+function mondayOf(d){const x=new Date(d.getFullYear(),d.getMonth(),d.getDate());x.setDate(x.getDate()-((x.getDay()+6)%7));return x}
+const addW = (d,n) => { const x=new Date(d); x.setDate(x.getDate()+7*n); return x };
+
+let people = [], tab = "personnes", draft = null, city = "", yearStart = new Date().getMonth()>=7 ? new Date().getFullYear() : new Date().getFullYear()-1;
+// semaines de l'année scolaire (lundis), de début septembre à fin août
+function weeks(){ const out=[]; let d=mondayOf(new Date(yearStart,8,1)); const end=new Date(yearStart+1,8,1);
+  while(d<end){out.push(d); d=addW(d,1)} return out; }
+const yearLabel = () => `${yearStart}-${yearStart+1}`;
+
+// présence d'une personne dans une ville pour une semaine donnée
+function cityAt(p, mon){
+  const school = (p.school_weeks||[]).includes(iso(mon));
+  return norm(school ? p.school_city : p.company_city);
+}
+
+let KEY = null, matches = [];
+async function rpc(fn, args={}){
+  const {data,error} = await sb.rpc(fn,{k:KEY,...args});
+  if (error) { alert("Erreur : "+error.message); throw error; }
+  return data;
+}
+async function load(){
+  const d = await rpc("pa_load"); people = d.people; matches = d.matches;
+}
+async function init(){
+  const m = location.hash.match(/k=([a-f0-9]+)/);
+  try { if (m) localStorage.setItem("pa_key", m[1]); KEY = m ? m[1] : localStorage.getItem("pa_key"); } catch { KEY = m && m[1]; }
+  if (!KEY) { $app.innerHTML = '<div class="card login"><h1>Planning alternants</h1><p class="mut">Lien incomplet : ouvre le lien complet qui finit par <code>#k=…</code>.</p></div>'; return; }
+  try { await load(); } catch { $app.innerHTML = '<div class="card login"><h1>Lien invalide</h1><p class="mut">Ce lien n\'est pas le bon.</p></div>'; return; }
+  render();
+  window.addEventListener("focus", async()=>{ if(!draft){ await load(); render(); } });
+}
+function header(){
+  return `<header><h1>📅 Planning alternants</h1>
+  <button class="tab ${tab==="personnes"?"on":""}" data-tab="personnes">1. Personnes</button>
+  <button class="tab ${tab==="calendrier"?"on":""}" data-tab="calendrier">2. Calendrier par ville</button>
+  <button class="tab ${tab==="matchs"?"on":""}" data-tab="matchs">3. Matchs (${matches.length})</button>
+  <span style="flex:1"></span>
+  <button class="sec" id="py">◀</button><b>${yearLabel()}</b><button class="sec" id="ny">▶</button>
+  </header>`;
+}
+function bindHeader(){
+  document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{tab=b.dataset.tab;render()});
+  document.getElementById("py").onclick=()=>{yearStart--;render()};
+  document.getElementById("ny").onclick=()=>{yearStart++;render()};
+}
+const render = () => tab==="personnes" ? renderPeople() : tab==="calendrier" ? renderCal() : renderMatches();
+
+/* ---------- Onglet 1 : saisie ---------- */
+function renderPeople(){
+  const d = draft;
+  const ws = weeks();
+  let monthsHtml = "";
+  if (d){
+    const byMonth = {};
+    ws.forEach(w=>{ const k=w.getFullYear()+"-"+w.getMonth(); (byMonth[k] ||= {label:w.toLocaleDateString("fr-FR",{month:"long",year:"2-digit"}),list:[]}).list.push(w) });
+    monthsHtml = Object.values(byMonth).map(m=>`<div class="month"><b>${m.label}</b>${m.list.map(w=>
+      `<span class="w ${d.school_weeks.includes(iso(w))?"ec":""}" data-w="${iso(w)}" title="Semaine du ${w.toLocaleDateString("fr-FR")}">${w.getDate()}</span>`).join("")}</div>`).join("");
+  }
+  $app.innerHTML = header() + `<main>
+  <div class="card"><div class="bar"><b>Personnes (${people.length})</b><button id="new">+ Nouvelle personne</button></div>
+    <div class="list">${people.map(p=>`<span class="chip ${d&&d.id===p.id?"on":""}" data-edit="${p.id}">${esc(p.first_name)} ${esc(p.last_name)} <small>· ${esc(p.school_city)}${p.company_city?" / "+esc(p.company_city):""}</small></span>`).join("")||'<span class="mut">Personne pour l\'instant.</span>'}</div></div>
+  ${d?`<div class="card"><b>${d.id?"Modifier":"Nouvelle personne"}</b>
+    <div class="grid" style="margin:10px 0">
+      <label>Prénom<input id="f_first" value="${esc(d.first_name)}"></label>
+      <label>Nom<input id="f_last" value="${esc(d.last_name)}"></label>
+      <label>École<input id="f_school" value="${esc(d.school)}"></label>
+      <label>Ville de l'école<input id="f_sc" value="${esc(d.school_city)}"></label>
+      <label>Ville de l'entreprise<input id="f_cc" value="${esc(d.company_city)}"></label>
+      <label>Email<input id="f_email" type="email" value="${esc(d.email)}"></label>
+      <label>Téléphone<input id="f_phone" value="${esc(d.phone)}"></label>
+      <label>Notes<input id="f_notes" value="${esc(d.notes)}"></label></div>
+    <div class="bar"><b>Rythme ${yearLabel()}</b> — clique sur les semaines <u>à l'école</u> (le reste = entreprise)
+      <span class="leg"><i style="background:var(--ec)"></i>École<i style="background:var(--en)"></i>Entreprise</span></div>
+    <div class="bar mut">Remplissage rapide :
+      <input id="g_s" type="number" min="1" value="2" style="width:60px"> sem. école puis
+      <input id="g_c" type="number" min="1" value="2" style="width:60px"> sem. entreprise, à partir de la semaine du
+      <input id="g_d" type="date" value="${iso(ws[0])}">
+      <button class="sec" id="gen">Appliquer</button><button class="sec" id="clr">Tout vider</button></div>
+    <div class="months" id="months">${monthsHtml}</div>
+    <button id="save">Enregistrer</button> <button class="sec" id="cancel">Fermer</button> ${d.id?'<button class="del" id="del">Supprimer</button>':""}
+  </div>`:""}
+  <div class="card mut">📎 Tu as déjà les calendriers en PDF, Excel ou photo ? Dépose-les dans le dossier <code>a-importer</code> de ce projet et dis-le moi : je les traduis en planning.</div>
+  </main>`;
+  bindHeader();
+  document.getElementById("new").onclick=()=>{draft={first_name:"",last_name:"",school:"",school_city:"",company_city:"",email:"",phone:"",notes:"",school_weeks:[]};render()};
+  document.querySelectorAll("[data-edit]").forEach(el=>el.onclick=()=>{const p=people.find(x=>x.id===el.dataset.edit);draft=JSON.parse(JSON.stringify(p));render()});
+  if(!d) return;
+  const sync=()=>{d.first_name=f_first.value;d.last_name=f_last.value;d.school=f_school.value;d.school_city=f_sc.value;d.company_city=f_cc.value;d.email=f_email.value;d.phone=f_phone.value;d.notes=f_notes.value};
+  // clic / glisser pour peindre les semaines
+  let painting=null;
+  const paint=el=>{const k=el.dataset.w; const has=d.school_weeks.includes(k);
+    if(painting===null) painting=!has;
+    if(painting&&!has)d.school_weeks.push(k); if(!painting&&has)d.school_weeks=d.school_weeks.filter(x=>x!==k);
+    el.classList.toggle("ec",painting)};
+  const m=document.getElementById("months");
+  m.onmousedown=e=>{if(e.target.dataset.w){painting=null;paint(e.target)}};
+  m.onmouseover=e=>{if(e.buttons&&e.target.dataset.w&&painting!==null)paint(e.target)};
+  document.onmouseup=()=>painting=null;
+  document.getElementById("gen").onclick=()=>{sync();
+    const s=+g_s.value,c=+g_c.value; if(!g_d.value)return;
+    const start=mondayOf(new Date(g_d.value+"T00:00")); const set=new Set(d.school_weeks);
+    ws.forEach(w=>{const i=Math.round((w-start)/(7*DAY)); if(i<0)return; const k=iso(w); (i%(s+c)<s)?set.add(k):set.delete(k)});
+    d.school_weeks=[...set]; render()};
+  document.getElementById("clr").onclick=()=>{sync();const set=new Set(ws.map(iso));d.school_weeks=d.school_weeks.filter(k=>!set.has(k));render()};
+  document.getElementById("cancel").onclick=()=>{draft=null;render()};
+  const del=document.getElementById("del"); if(del) del.onclick=async()=>{ if(!confirm("Supprimer cette personne ?"))return;
+    await rpc("pa_delete_person",{pid:d.id}); draft=null; await load(); render()};
+  document.getElementById("save").onclick=async()=>{sync();
+    if(!d.first_name.trim()||!d.last_name.trim()||!d.school_city.trim()) return alert("Prénom, nom et ville de l'école sont obligatoires.");
+    const row={id:d.id||null,first_name:d.first_name.trim(),last_name:d.last_name.trim(),school:d.school.trim()||null,school_city:d.school_city.trim(),company_city:d.company_city.trim()||null,school_weeks:d.school_weeks,email:d.email.trim()||null,phone:d.phone.trim()||null,notes:d.notes.trim()||null};
+    await rpc("pa_save_person",{r:row}); draft=null; await load(); render()};
+}
+
+/* ---------- Onglet 2 : calendrier par ville ---------- */
+function renderCal(){
+  const cityMap = {};
+  people.forEach(p=>[p.school_city,p.company_city].forEach(c=>{if(c&&c.trim())cityMap[norm(c)] ||= c.trim()}));
+  const cities = Object.entries(cityMap).sort((a,b)=>a[1].localeCompare(b[1]));
+  if (!cities.some(([k])=>k===norm(city))) city = cities[0]?.[0] || "";
+  const ws = weeks(), thisMon = iso(mondayOf(new Date()));
+  const members = people.filter(p=>ws.some(w=>cityAt(p,w)===city));
+  const present = (p,w)=>cityAt(p,w)===city;
+
+  let head="<tr><th></th>",prev=-1;
+  ws.forEach(w=>{const m=w.getMonth(); head+= m!==prev?`<th class="mo">${w.toLocaleDateString("fr-FR",{month:"short"})}</th>`:`<th>${w.getDate()}</th>`; prev=m}); head+="</tr>";
+  const rows = members.map(p=>`<tr><td class="name"><b>${esc(p.first_name)} ${esc(p.last_name)}</b><br><small class="mut">${esc(p.school||"")} · ${esc(p.school_city)}${p.company_city?" / "+esc(p.company_city):""}</small></td>${
+    ws.map(w=>{const here=present(p,w); const sch=(p.school_weeks||[]).includes(iso(w));
+      return `<td class="c ${here?(sch?"p":"pn"):""}" title="${esc(p.first_name)} — ${w.toLocaleDateString("fr-FR")} : ${here?(sch?"école":"entreprise"):"ailleurs"}"></td>`}).join("")}</tr>`).join("");
+  const sum = `<tr class="sum"><td class="name mut">Occupation (vert = libre / 1 pers., rouge = conflit)</td>${ws.map(w=>{
+    const n=members.filter(p=>present(p,w)).length; return `<td class="c ${n===0?"free":n===1?"one":"two"}${iso(w)===thisMon?" today":""}" title="${n} pers."></td>`}).join("")}</tr>`;
+
+  const pairs=[]; for(let i=0;i<members.length;i++)for(let j=i+1;j<members.length;j++){
+    const a=members[i],b=members[j]; let common=0, covered=0;
+    ws.forEach(w=>{const pa=present(a,w),pb=present(b,w); if(pa&&pb)common++; if(pa||pb)covered++});
+    pairs.push({a,b,common,covered})}
+  pairs.sort((x,y)=>x.common-y.common||y.covered-x.covered);
+  const saved=new Set(matches.map(m=>[m.person_a,m.person_b].sort().join("|")+"|"+norm(m.city)));
+  const key=p=>[p.a.id,p.b.id].sort().join("|")+"|"+city;
+  const lbl=p=>`<span class="pair ${p.common?"part":""}">${esc(p.a.first_name)} ${esc(p.a.last_name)} ⇄ ${esc(p.b.first_name)} ${esc(p.b.last_name)} <small class="mut">${p.common?p.common+" sem. en commun":"aucune semaine en commun"} · ${p.covered}/${ws.length} sem. occupées</small> <button class="sec" data-match="${p.a.id}|${p.b.id}" style="padding:2px 8px">✓ Valider</button></span>`;
+  const fresh=pairs.filter(p=>!saved.has(key(p))); const perfect=fresh.filter(p=>!p.common), close=fresh.filter(p=>p.common>0&&p.common<=4);
+
+  $app.innerHTML = header()+`<main>
+  <div class="card"><div class="bar"><b>Ville :</b>
+    <div class="list">${cities.map(([k,l])=>`<span class="chip ${k===city?"on":""}" data-city="${k}">${esc(l)}</span>`).join("")||'<span class="mut">Ajoute d\'abord des personnes.</span>'}</div></div></div>
+  ${city?`<div class="card"><b>✅ Ça matche (jamais là en même temps)</b><div style="margin-top:8px">${perfect.map(lbl).join("")||'<span class="mut">Aucune paire compatible pour l\'instant.</span>'}</div>
+    ${close.length?`<div class="mut" style="margin-top:10px">Presque (4 semaines en commun ou moins) :</div>${close.map(lbl).join("")}`:""}</div>
+  <div class="card"><div class="bar"><b>Calendrier ${yearLabel()}</b><span class="leg"><i style="background:var(--ec)"></i>En école ici<i style="background:var(--en)"></i>En entreprise ici</span></div>
+    <div class="cal"><table>${head}${rows}${sum}</table></div></div>`:""}
+  </main>`;
+  bindHeader();
+  document.querySelectorAll("[data-city]").forEach(el=>el.onclick=()=>{city=el.dataset.city;render()});
+  document.querySelectorAll("[data-match]").forEach(el=>el.onclick=async()=>{const [a,b]=el.dataset.match.split("|");
+    await rpc("pa_save_match",{a,b,c:cityMap[city]}); await load(); render()});
+}
+
+/* ---------- Onglet 3 : matchs validés ---------- */
+let openMatch=null;
+function renderMatches(){
+  const byId=Object.fromEntries(people.map(p=>[p.id,p]));
+  const card=p=>p?`<div class="card" style="margin:0"><b>${esc(p.first_name)} ${esc(p.last_name)}</b><br>
+    <span class="mut">École :</span> ${esc(p.school||"—")} (${esc(p.school_city)})<br>
+    <span class="mut">Entreprise :</span> ${esc(p.company_city||"—")}<br>
+    <span class="mut">Email :</span> ${p.email?`<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>`:"—"}<br>
+    <span class="mut">Tél :</span> ${p.phone?`<a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>`:"—"}<br>
+    ${p.notes?`<span class="mut">Notes :</span> ${esc(p.notes)}`:""}</div>`:"";
+  $app.innerHTML=header()+`<main><div class="card"><b>Matchs validés (${matches.length})</b>
+    <div style="margin-top:10px">${matches.map(m=>{const a=byId[m.person_a],b=byId[m.person_b]; if(!a||!b)return"";
+      return `<div class="card" style="margin:8px 0;cursor:pointer" data-open="${m.id}"><b>${esc(a.first_name)} ${esc(a.last_name)} ⇄ ${esc(b.first_name)} ${esc(b.last_name)}</b>
+      <span class="mut"> · ${esc(m.city)} · validé le ${new Date(m.created_at).toLocaleDateString("fr-FR")}</span>
+      ${openMatch===m.id?`<div class="grid" style="margin-top:10px">${card(a)}${card(b)}</div>
+        <div class="bar" style="margin-top:10px"><input id="mn" placeholder="Notes sur ce match" value="${esc(m.notes)}" style="flex:1"><button id="mns">Enregistrer la note</button><button class="del" id="mdel">Supprimer le match</button></div>`:""}</div>`}).join("")||'<span class="mut">Aucun match validé. Dans l\'onglet Calendrier, clique sur « ✓ Valider ».</span>'}</div></div></main>`;
+  bindHeader();
+  document.querySelectorAll("[data-open]").forEach(el=>el.onclick=e=>{ if(e.target.closest("input,button,a"))return; openMatch=openMatch===el.dataset.open?null:el.dataset.open; render()});
+  const n=document.getElementById("mns"); if(n) n.onclick=async()=>{await rpc("pa_note_match",{mid:openMatch,n:document.getElementById("mn").value});await load();render()};
+  const d=document.getElementById("mdel"); if(d) d.onclick=async()=>{if(!confirm("Supprimer ce match ?"))return;await rpc("pa_delete_match",{mid:openMatch});openMatch=null;await load();render()};
+}
+init();
+</script>
+</body>
+</html>
