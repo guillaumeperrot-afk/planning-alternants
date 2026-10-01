@@ -96,6 +96,18 @@ function bindHeader(){
 const render = () => tab==="personnes" ? renderPeople() : tab==="calendrier" ? renderCal() : renderMatches();
 
 /* ---------- Onglet 1 : saisie ---------- */
+function tplFor(d, ws){
+  if(!norm(d.school)||!norm(d.school_year)) return null;
+  const set=new Set(ws.map(iso));
+  const grp=people.filter(p=>p.id!==d.id&&norm(p.school)===norm(d.school)&&norm(p.school_year)===norm(d.school_year));
+  const cnt={};
+  grp.forEach(p=>{const k=(p.school_weeks||[]).filter(x=>set.has(x)).sort().join(","); if(k)cnt[k]=(cnt[k]||0)+1});
+  const best=Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0];
+  return best?{weeks:best[0].split(","),n:grp.length}:null;
+}
+const hasWeeks=(d,ws)=>{const set=new Set(ws.map(iso));return d.school_weeks.some(k=>set.has(k))};
+function applyTpl(d,ws,t){const set=new Set(ws.map(iso)); d.school_weeks=d.school_weeks.filter(k=>!set.has(k)).concat(t.weeks); d.prefilled=t.n;}
+
 function renderPeople(){
   const d = draft;
   const ws = weeks();
@@ -106,19 +118,24 @@ function renderPeople(){
     monthsHtml = Object.values(byMonth).map(m=>`<div class="month"><b>${m.label}</b>${m.list.map(w=>
       `<span class="w ${d.school_weeks.includes(iso(w))?"ec":""}" data-w="${iso(w)}" title="Semaine du ${w.toLocaleDateString("fr-FR")}">${w.getDate()}</span>`).join("")}</div>`).join("");
   }
+  const t = d ? tplFor(d, ws) : null;
+  const tplInfo = !d ? "" : d.prefilled ? `<div class="pair" style="display:block;margin:0 0 10px">✨ Planning pré-rempli depuis ${d.prefilled} personne(s) de ${esc(d.school)} ${esc(d.school_year)} — ajuste si besoin.</div>`
+    : t ? `<div class="pair part" style="display:block;margin:0 0 10px">💡 Des personnes de ${esc(d.school)} ${esc(d.school_year)} ont déjà un planning. <button class="sec" id="tpl" style="padding:2px 8px">Appliquer ce planning</button></div>` : "";
   $app.innerHTML = header() + `<main>
   <div class="card"><div class="bar"><b>Personnes (${people.length})</b><button id="new">+ Nouvelle personne</button></div>
-    <div class="list">${people.map(p=>`<span class="chip ${d&&d.id===p.id?"on":""}" data-edit="${p.id}">${esc(p.first_name)} ${esc(p.last_name)} <small>· ${esc(p.school_city)}${p.company_city?" / "+esc(p.company_city):""}</small></span>`).join("")||'<span class="mut">Personne pour l\'instant.</span>'}</div></div>
+    <div class="list">${people.map(p=>`<span class="chip ${d&&d.id===p.id?"on":""}" data-edit="${p.id}">${esc(p.first_name)} ${esc(p.last_name)} <small>· ${p.school?esc(p.school)+(p.school_year?" "+esc(p.school_year):"")+" · ":""}${esc(p.school_city)}${p.company_city?" / "+esc(p.company_city):""}</small></span>`).join("")||'<span class="mut">Personne pour l\'instant.</span>'}</div></div>
   ${d?`<div class="card"><b>${d.id?"Modifier":"Nouvelle personne"}</b>
     <div class="grid" style="margin:10px 0">
       <label>Prénom<input id="f_first" value="${esc(d.first_name)}"></label>
       <label>Nom<input id="f_last" value="${esc(d.last_name)}"></label>
-      <label>École<input id="f_school" value="${esc(d.school)}"></label>
+      <label>École<input id="f_school" value="${esc(d.school)}" placeholder="ex. ICAM"></label>
+      <label>Année / promo<input id="f_year" value="${esc(d.school_year)}" placeholder="ex. 3e année"></label>
       <label>Ville de l'école<input id="f_sc" value="${esc(d.school_city)}"></label>
       <label>Ville de l'entreprise<input id="f_cc" value="${esc(d.company_city)}"></label>
       <label>Email<input id="f_email" type="email" value="${esc(d.email)}"></label>
       <label>Téléphone<input id="f_phone" value="${esc(d.phone)}"></label>
       <label>Notes<input id="f_notes" value="${esc(d.notes)}"></label></div>
+    ${tplInfo}
     <div class="bar"><b>Rythme ${yearLabel()}</b> — clique sur les semaines <u>à l'école</u> (le reste = entreprise)
       <span class="leg"><i style="background:var(--ec)"></i>École<i style="background:var(--en)"></i>Entreprise</span></div>
     <div class="bar mut">Remplissage rapide :
@@ -132,11 +149,14 @@ function renderPeople(){
   <div class="card mut">📎 Tu as déjà les calendriers en PDF, Excel ou photo ? Dépose-les dans le dossier <code>a-importer</code> de ce projet et dis-le moi : je les traduis en planning.</div>
   </main>`;
   bindHeader();
-  document.getElementById("new").onclick=()=>{draft={first_name:"",last_name:"",school:"",school_city:"",company_city:"",email:"",phone:"",notes:"",school_weeks:[]};render()};
+  document.getElementById("new").onclick=()=>{draft={first_name:"",last_name:"",school:"",school_year:"",school_city:"",company_city:"",email:"",phone:"",notes:"",school_weeks:[]};render()};
   document.querySelectorAll("[data-edit]").forEach(el=>el.onclick=()=>{const p=people.find(x=>x.id===el.dataset.edit);draft=JSON.parse(JSON.stringify(p));render()});
   if(!d) return;
-  const sync=()=>{d.first_name=f_first.value;d.last_name=f_last.value;d.school=f_school.value;d.school_city=f_sc.value;d.company_city=f_cc.value;d.email=f_email.value;d.phone=f_phone.value;d.notes=f_notes.value};
+  const sync=()=>{d.first_name=f_first.value;d.last_name=f_last.value;d.school=f_school.value;d.school_year=f_year.value;d.school_city=f_sc.value;d.company_city=f_cc.value;d.email=f_email.value;d.phone=f_phone.value;d.notes=f_notes.value};
   // clic / glisser pour peindre les semaines
+  const tryTpl=()=>{sync(); const t=tplFor(d,ws); if(t&&!d.id&&!hasWeeks(d,ws)) applyTpl(d,ws,t); render()};
+  f_school.onchange=tryTpl; f_year.onchange=tryTpl;
+  const tb=document.getElementById("tpl"); if(tb) tb.onclick=()=>{sync(); applyTpl(d,ws,tplFor(d,ws)); render()};
   let painting=null;
   const paint=el=>{const k=el.dataset.w; const has=d.school_weeks.includes(k);
     if(painting===null) painting=!has;
@@ -151,13 +171,13 @@ function renderPeople(){
     const start=mondayOf(new Date(g_d.value+"T00:00")); const set=new Set(d.school_weeks);
     ws.forEach(w=>{const i=Math.round((w-start)/(7*DAY)); if(i<0)return; const k=iso(w); (i%(s+c)<s)?set.add(k):set.delete(k)});
     d.school_weeks=[...set]; render()};
-  document.getElementById("clr").onclick=()=>{sync();const set=new Set(ws.map(iso));d.school_weeks=d.school_weeks.filter(k=>!set.has(k));render()};
+  document.getElementById("clr").onclick=()=>{sync();d.prefilled=0;const set=new Set(ws.map(iso));d.school_weeks=d.school_weeks.filter(k=>!set.has(k));render()};
   document.getElementById("cancel").onclick=()=>{draft=null;render()};
   const del=document.getElementById("del"); if(del) del.onclick=async()=>{ if(!confirm("Supprimer cette personne ?"))return;
     await rpc("pa_delete_person",{pid:d.id}); draft=null; await load(); render()};
   document.getElementById("save").onclick=async()=>{sync();
     if(!d.first_name.trim()||!d.last_name.trim()||!d.school_city.trim()) return alert("Prénom, nom et ville de l'école sont obligatoires.");
-    const row={id:d.id||null,first_name:d.first_name.trim(),last_name:d.last_name.trim(),school:d.school.trim()||null,school_city:d.school_city.trim(),company_city:d.company_city.trim()||null,school_weeks:d.school_weeks,email:d.email.trim()||null,phone:d.phone.trim()||null,notes:d.notes.trim()||null};
+    const row={id:d.id||null,first_name:d.first_name.trim(),last_name:d.last_name.trim(),school:d.school.trim()||null,school_year:d.school_year.trim()||null,school_city:d.school_city.trim(),company_city:d.company_city.trim()||null,school_weeks:d.school_weeks,email:d.email.trim()||null,phone:d.phone.trim()||null,notes:d.notes.trim()||null};
     await rpc("pa_save_person",{r:row}); draft=null; await load(); render()};
 }
 
