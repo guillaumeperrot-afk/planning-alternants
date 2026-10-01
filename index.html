@@ -32,7 +32,7 @@ th{font-weight:400;color:var(--mut);font-size:10px;padding:2px}th.mo{text-align:
 td.name{padding:4px 10px;white-space:nowrap;position:sticky;left:0;background:var(--card);min-width:200px;z-index:1}
 td.c{width:24px;height:26px;min-width:24px}
 .p{background:var(--ec)}.pn{background:var(--en)}
-tr.sum td.c{height:14px}.free{background:#bbf7d0}.one{background:#4ade80}.two{background:var(--bad)}
+tr.pick td.name{background:var(--okbg)}tr.sum td.c{height:14px}.free{background:#bbf7d0}.one{background:#4ade80}.two{background:var(--bad)}
 .pair{display:inline-block;background:var(--okbg);border:1px solid var(--ok);border-radius:999px;padding:5px 14px;margin:3px}
 .pair.part{background:transparent;border-color:var(--bd)}
 .bar{display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
@@ -50,6 +50,7 @@ const iso = d => { const z=new Date(d.getTime()-d.getTimezoneOffset()*6e4); retu
 function mondayOf(d){const x=new Date(d.getFullYear(),d.getMonth(),d.getDate());x.setDate(x.getDate()-((x.getDay()+6)%7));return x}
 const addW = (d,n) => { const x=new Date(d); x.setDate(x.getDate()+7*n); return x };
 
+let picked = [];
 let people = [], tab = "personnes", draft = null, city = "", yearStart = new Date().getMonth()>=7 ? new Date().getFullYear() : new Date().getFullYear()-1;
 // semaines de l'année scolaire (lundis), de début septembre à fin août
 function weeks(){ const out=[]; let d=mondayOf(new Date(yearStart,8,1)); const end=new Date(yearStart+1,8,1);
@@ -126,7 +127,7 @@ function renderPeople(){
     : t ? `<div class="pair part" style="display:block;margin:0 0 10px">💡 Des personnes de ${esc(d.school)} ${esc(d.school_year)} ont déjà un planning. <button class="sec" id="tpl" style="padding:2px 8px">Appliquer ce planning</button></div>` : "";
   $app.innerHTML = header() + `<main>
   <div class="card"><div class="bar"><b>Personnes (${people.length})</b><button id="new">+ Nouvelle personne</button></div>
-    <div class="list">${people.map(p=>`<span class="chip ${d&&d.id===p.id?"on":""}" data-edit="${p.id}">${hsIcon(p)} ${esc(p.first_name)} ${esc(p.last_name)} <small>· ${p.school?esc(p.school)+(p.school_year?" "+esc(p.school_year):"")+" · ":""}${esc(p.school_city)}${p.company_city?" / "+esc(p.company_city):""}</small> <b class="xdel" data-del="${p.id}" title="Supprimer" style="margin-left:6px;opacity:.6">✕</b></span>`).join("")||'<span class="mut">Personne pour l\'instant.</span>'}</div></div>
+    <div class="list">${people.map(p=>`<span class="chip ${d&&d.id===p.id?"on":""}" data-edit="${p.id}">${matches.some(m=>m.person_a===p.id||m.person_b===p.id)?"🤝":hsIcon(p)} ${esc(p.first_name)} ${esc(p.last_name)} <small>· ${p.school?esc(p.school)+(p.school_year?" "+esc(p.school_year):"")+" · ":""}${esc(p.school_city)}${p.company_city?" / "+esc(p.company_city):""}</small> <b class="xdel" data-del="${p.id}" title="Supprimer" style="margin-left:6px;opacity:.6">✕</b></span>`).join("")||'<span class="mut">Personne pour l\'instant.</span>'}</div></div>
   ${d?`<div class="card"><b>${d.id?"Modifier":"Nouvelle personne"}</b>
     <div class="grid" style="margin:10px 0">
       <label>Prénom<input id="f_first" value="${esc(d.first_name)}"></label>
@@ -195,12 +196,18 @@ function renderCal(){
   const cities = Object.entries(cityMap).sort((a,b)=>a[1].localeCompare(b[1]));
   if (!cities.some(([k])=>k===norm(city))) city = cities[0]?.[0] || "";
   const ws = weeks(), thisMon = iso(mondayOf(new Date()));
-  const members = people.filter(p=>ws.some(w=>cityAt(p,w)===city));
   const present = (p,w)=>cityAt(p,w)===city;
+  const taken = new Set(matches.flatMap(m=>[m.person_a,m.person_b]));
+  const members = people.filter(p=>!taken.has(p.id)&&ws.some(w=>cityAt(p,w)===city));
+  picked = picked.filter(id=>members.some(p=>p.id===id));
+  const pk = picked.map(id=>members.find(p=>p.id===id));
+  let pkInfo = "";
+  if (pk.length===2){ let c=0; ws.forEach(w=>{ if(present(pk[0],w)&&present(pk[1],w)) c++ });
+    pkInfo = c? `<span class="mut"> (${c} sem. en commun : match imparfait)</span>` : `<span class="mut"> (aucune semaine en commun)</span>`; }
 
   let head="<tr><th></th>",prev=-1;
   ws.forEach(w=>{const m=w.getMonth(); head+= m!==prev?`<th class="mo">${w.toLocaleDateString("fr-FR",{month:"short"})}</th>`:`<th>${w.getDate()}</th>`; prev=m}); head+="</tr>";
-  const rows = members.map(p=>`<tr><td class="name"><b>${hsIcon(p)} ${esc(p.first_name)} ${esc(p.last_name)}</b><br><small class="mut">${esc(p.school||"")} · ${esc(p.school_city)}${p.company_city?" / "+esc(p.company_city):""}</small></td>${
+  const rows = members.map(p=>`<tr class="${picked.includes(p.id)?"pick":""}"><td class="name" data-pick="${p.id}" style="cursor:pointer" title="Clique pour sélectionner">${picked.includes(p.id)?"☑ ":"☐ "}<b>${hsIcon(p)} ${esc(p.first_name)} ${esc(p.last_name)}</b><br><small class="mut">${esc(p.school||"")} · ${esc(p.school_city)}${p.company_city?" / "+esc(p.company_city):""}</small></td>${
     ws.map(w=>{const here=present(p,w); const sch=(p.school_weeks||[]).includes(iso(w));
       return `<td class="c ${here?(sch?"p":"pn"):""}" title="${esc(p.first_name)} — ${w.toLocaleDateString("fr-FR")} : ${here?(sch?"école":"entreprise"):"ailleurs"}"></td>`}).join("")}</tr>`).join("");
   const sum = `<tr class="sum"><td class="name mut">Occupation (vert = libre / 1 pers., rouge = conflit)</td>${ws.map(w=>{
@@ -221,11 +228,21 @@ function renderCal(){
     <div class="list">${cities.map(([k,l])=>`<span class="chip ${k===city?"on":""}" data-city="${k}">${esc(l)}</span>`).join("")||'<span class="mut">Ajoute d\'abord des personnes.</span>'}</div></div></div>
   ${city?`<div class="card"><b>✅ Ça matche (jamais là en même temps)</b><div style="margin-top:8px">${perfect.map(lbl).join("")||'<span class="mut">Aucune paire compatible pour l\'instant.</span>'}</div>
     ${close.length?`<div class="mut" style="margin-top:10px">Presque (4 semaines en commun ou moins) :</div>${close.map(lbl).join("")}`:""}</div>
-  <div class="card"><div class="bar"><b>Calendrier ${yearLabel()}</b><span class="leg"><i style="background:var(--ec)"></i>En école ici<i style="background:var(--en)"></i>En entreprise ici</span></div>
+  <div class="card" style="border-color:var(--ec)"><div class="bar"><b>🤝 Matcher à la main</b>
+    <span class="mut">Coche deux personnes dans le calendrier (clique sur leur nom), même si le match est imparfait.</span></div>
+    <div class="bar" style="margin:0">${pk.length?pk.map(p=>`<span class="pair">${esc(p.first_name)} ${esc(p.last_name)}</span>`).join(" + "):'<span class="mut">Aucune personne cochée.</span>'}${pkInfo}
+    <button id="mm" ${pk.length===2?"":"disabled"} style="${pk.length===2?"":"opacity:.4"}">Valider ce match</button>
+    ${pk.length?'<button class="sec" id="mc">Décocher</button>':""}</div></div>
+  <div class="card"><div class="bar"><b>Calendrier ${yearLabel()}</b><span class="mut">Les personnes déjà matchées n'apparaissent plus ici.</span><span class="leg"><i style="background:var(--ec)"></i>En école ici<i style="background:var(--en)"></i>En entreprise ici</span></div>
     <div class="cal"><table>${head}${rows}${sum}</table></div></div>`:""}
   </main>`;
   bindHeader();
   document.querySelectorAll("[data-city]").forEach(el=>el.onclick=()=>{city=el.dataset.city;render()});
+  document.querySelectorAll("[data-pick]").forEach(el=>el.onclick=()=>{const id=el.dataset.pick;
+    picked = picked.includes(id) ? picked.filter(x=>x!==id) : [...picked, id].slice(-2); render()});
+  const mm=document.getElementById("mm"); if(mm) mm.onclick=async()=>{ if(picked.length!==2)return;
+    await rpc("pa_save_match",{a:picked[0],b:picked[1],c:cityMap[city]}); picked=[]; await load(); render()};
+  const mc=document.getElementById("mc"); if(mc) mc.onclick=()=>{picked=[];render()};
   document.querySelectorAll("[data-match]").forEach(el=>el.onclick=async()=>{const [a,b]=el.dataset.match.split("|");
     await rpc("pa_save_match",{a,b,c:cityMap[city]}); await load(); render()});
 }
