@@ -95,6 +95,9 @@ function bindHeader(){
 }
 const render = () => tab==="personnes" ? renderPeople() : tab==="calendrier" ? renderCal() : renderMatches();
 
+const HS = {a:"🏠 A un logement", cherche:"🔍 Cherche un logement", indecis:"❔ Pas décidé"};
+const hsIcon = p => (HS[p.housing_status]||HS.cherche).split(" ")[0];
+const isIdeal = (a,b) => (a.housing_status==="a"&&b.housing_status==="cherche")||(a.housing_status==="cherche"&&b.housing_status==="a");
 /* ---------- Onglet 1 : saisie ---------- */
 function tplFor(d, ws){
   if(!norm(d.school)||!norm(d.school_year)) return null;
@@ -123,7 +126,7 @@ function renderPeople(){
     : t ? `<div class="pair part" style="display:block;margin:0 0 10px">💡 Des personnes de ${esc(d.school)} ${esc(d.school_year)} ont déjà un planning. <button class="sec" id="tpl" style="padding:2px 8px">Appliquer ce planning</button></div>` : "";
   $app.innerHTML = header() + `<main>
   <div class="card"><div class="bar"><b>Personnes (${people.length})</b><button id="new">+ Nouvelle personne</button></div>
-    <div class="list">${people.map(p=>`<span class="chip ${d&&d.id===p.id?"on":""}" data-edit="${p.id}">${esc(p.first_name)} ${esc(p.last_name)} <small>· ${p.school?esc(p.school)+(p.school_year?" "+esc(p.school_year):"")+" · ":""}${esc(p.school_city)}${p.company_city?" / "+esc(p.company_city):""}</small></span>`).join("")||'<span class="mut">Personne pour l\'instant.</span>'}</div></div>
+    <div class="list">${people.map(p=>`<span class="chip ${d&&d.id===p.id?"on":""}" data-edit="${p.id}">${hsIcon(p)} ${esc(p.first_name)} ${esc(p.last_name)} <small>· ${p.school?esc(p.school)+(p.school_year?" "+esc(p.school_year):"")+" · ":""}${esc(p.school_city)}${p.company_city?" / "+esc(p.company_city):""}</small> <b class="xdel" data-del="${p.id}" title="Supprimer" style="margin-left:6px;opacity:.6">✕</b></span>`).join("")||'<span class="mut">Personne pour l\'instant.</span>'}</div></div>
   ${d?`<div class="card"><b>${d.id?"Modifier":"Nouvelle personne"}</b>
     <div class="grid" style="margin:10px 0">
       <label>Prénom<input id="f_first" value="${esc(d.first_name)}"></label>
@@ -132,6 +135,7 @@ function renderPeople(){
       <label>Année / promo<input id="f_year" value="${esc(d.school_year)}" placeholder="ex. 3e année"></label>
       <label>Ville de l'école<input id="f_sc" value="${esc(d.school_city)}"></label>
       <label>Ville de l'entreprise<input id="f_cc" value="${esc(d.company_city)}"></label>
+      <label>Logement<select id="f_hs">${Object.entries(HS).map(([k,v])=>`<option value="${k}" ${(d.housing_status||"cherche")===k?"selected":""}>${v}</option>`).join("")}</select></label>
       <label>Email<input id="f_email" type="email" value="${esc(d.email)}"></label>
       <label>Téléphone<input id="f_phone" value="${esc(d.phone)}"></label>
       <label>Notes<input id="f_notes" value="${esc(d.notes)}"></label></div>
@@ -149,10 +153,13 @@ function renderPeople(){
   <div class="card mut">📎 Tu as déjà les calendriers en PDF, Excel ou photo ? Dépose-les dans le dossier <code>a-importer</code> de ce projet et dis-le moi : je les traduis en planning.</div>
   </main>`;
   bindHeader();
-  document.getElementById("new").onclick=()=>{draft={first_name:"",last_name:"",school:"",school_year:"",school_city:"",company_city:"",email:"",phone:"",notes:"",school_weeks:[]};render()};
+  document.getElementById("new").onclick=()=>{draft={first_name:"",last_name:"",school:"",school_year:"",school_city:"",company_city:"",housing_status:"cherche",email:"",phone:"",notes:"",school_weeks:[]};render()};
+  document.querySelectorAll("[data-del]").forEach(el=>el.onclick=async e=>{e.stopPropagation();
+    const p=people.find(x=>x.id===el.dataset.del); if(!confirm("Supprimer "+p.first_name+" "+p.last_name+" (et ses matchs) ?"))return;
+    await rpc("pa_delete_person",{pid:p.id}); if(draft&&draft.id===p.id)draft=null; await load(); render()});
   document.querySelectorAll("[data-edit]").forEach(el=>el.onclick=()=>{const p=people.find(x=>x.id===el.dataset.edit);draft=JSON.parse(JSON.stringify(p));render()});
   if(!d) return;
-  const sync=()=>{d.first_name=f_first.value;d.last_name=f_last.value;d.school=f_school.value;d.school_year=f_year.value;d.school_city=f_sc.value;d.company_city=f_cc.value;d.email=f_email.value;d.phone=f_phone.value;d.notes=f_notes.value};
+  const sync=()=>{d.first_name=f_first.value;d.last_name=f_last.value;d.school=f_school.value;d.school_year=f_year.value;d.school_city=f_sc.value;d.company_city=f_cc.value;d.housing_status=f_hs.value;d.email=f_email.value;d.phone=f_phone.value;d.notes=f_notes.value};
   // clic / glisser pour peindre les semaines
   const tryTpl=()=>{sync(); const t=tplFor(d,ws); if(t&&!d.id&&!hasWeeks(d,ws)) applyTpl(d,ws,t); render()};
   f_school.onchange=tryTpl; f_year.onchange=tryTpl;
@@ -177,7 +184,7 @@ function renderPeople(){
     await rpc("pa_delete_person",{pid:d.id}); draft=null; await load(); render()};
   document.getElementById("save").onclick=async()=>{sync();
     if(!d.first_name.trim()||!d.last_name.trim()||!d.school_city.trim()) return alert("Prénom, nom et ville de l'école sont obligatoires.");
-    const row={id:d.id||null,first_name:d.first_name.trim(),last_name:d.last_name.trim(),school:d.school.trim()||null,school_year:d.school_year.trim()||null,school_city:d.school_city.trim(),company_city:d.company_city.trim()||null,school_weeks:d.school_weeks,email:d.email.trim()||null,phone:d.phone.trim()||null,notes:d.notes.trim()||null};
+    const row={id:d.id||null,first_name:d.first_name.trim(),last_name:d.last_name.trim(),school:d.school.trim()||null,school_year:d.school_year.trim()||null,housing_status:d.housing_status||"cherche",school_city:d.school_city.trim(),company_city:d.company_city.trim()||null,school_weeks:d.school_weeks,email:d.email.trim()||null,phone:d.phone.trim()||null,notes:d.notes.trim()||null};
     await rpc("pa_save_person",{r:row}); draft=null; await load(); render()};
 }
 
@@ -193,7 +200,7 @@ function renderCal(){
 
   let head="<tr><th></th>",prev=-1;
   ws.forEach(w=>{const m=w.getMonth(); head+= m!==prev?`<th class="mo">${w.toLocaleDateString("fr-FR",{month:"short"})}</th>`:`<th>${w.getDate()}</th>`; prev=m}); head+="</tr>";
-  const rows = members.map(p=>`<tr><td class="name"><b>${esc(p.first_name)} ${esc(p.last_name)}</b><br><small class="mut">${esc(p.school||"")} · ${esc(p.school_city)}${p.company_city?" / "+esc(p.company_city):""}</small></td>${
+  const rows = members.map(p=>`<tr><td class="name"><b>${hsIcon(p)} ${esc(p.first_name)} ${esc(p.last_name)}</b><br><small class="mut">${esc(p.school||"")} · ${esc(p.school_city)}${p.company_city?" / "+esc(p.company_city):""}</small></td>${
     ws.map(w=>{const here=present(p,w); const sch=(p.school_weeks||[]).includes(iso(w));
       return `<td class="c ${here?(sch?"p":"pn"):""}" title="${esc(p.first_name)} — ${w.toLocaleDateString("fr-FR")} : ${here?(sch?"école":"entreprise"):"ailleurs"}"></td>`}).join("")}</tr>`).join("");
   const sum = `<tr class="sum"><td class="name mut">Occupation (vert = libre / 1 pers., rouge = conflit)</td>${ws.map(w=>{
@@ -203,10 +210,10 @@ function renderCal(){
     const a=members[i],b=members[j]; let common=0, covered=0;
     ws.forEach(w=>{const pa=present(a,w),pb=present(b,w); if(pa&&pb)common++; if(pa||pb)covered++});
     pairs.push({a,b,common,covered})}
-  pairs.sort((x,y)=>x.common-y.common||y.covered-x.covered);
+  pairs.sort((x,y)=>x.common-y.common||(isIdeal(y.a,y.b)-isIdeal(x.a,x.b))||y.covered-x.covered);
   const saved=new Set(matches.map(m=>[m.person_a,m.person_b].sort().join("|")+"|"+norm(m.city)));
   const key=p=>[p.a.id,p.b.id].sort().join("|")+"|"+city;
-  const lbl=p=>`<span class="pair ${p.common?"part":""}">${esc(p.a.first_name)} ${esc(p.a.last_name)} ⇄ ${esc(p.b.first_name)} ${esc(p.b.last_name)} <small class="mut">${p.common?p.common+" sem. en commun":"aucune semaine en commun"} · ${p.covered}/${ws.length} sem. occupées</small> <button class="sec" data-match="${p.a.id}|${p.b.id}" style="padding:2px 8px">✓ Valider</button></span>`;
+  const lbl=p=>`<span class="pair ${p.common?"part":""}">${isIdeal(p.a,p.b)?"⭐ ":""}${hsIcon(p.a)}${esc(p.a.first_name)} ${esc(p.a.last_name)} ⇄ ${hsIcon(p.b)}${esc(p.b.first_name)} ${esc(p.b.last_name)} <small class="mut">${isIdeal(p.a,p.b)?"un a un logement, l'autre cherche · ":(p.a.housing_status==="a"&&p.b.housing_status==="a")?"les deux ont un logement · ":""}${p.common?p.common+" sem. en commun":"aucune semaine en commun"} · ${p.covered}/${ws.length} sem. occupées</small> <button class="sec" data-match="${p.a.id}|${p.b.id}" style="padding:2px 8px">✓ Valider</button></span>`;
   const fresh=pairs.filter(p=>!saved.has(key(p))); const perfect=fresh.filter(p=>!p.common), close=fresh.filter(p=>p.common>0&&p.common<=4);
 
   $app.innerHTML = header()+`<main>
@@ -228,6 +235,7 @@ let openMatch=null;
 function renderMatches(){
   const byId=Object.fromEntries(people.map(p=>[p.id,p]));
   const card=p=>p?`<div class="card" style="margin:0"><b>${esc(p.first_name)} ${esc(p.last_name)}</b><br>
+    <span class="mut">Logement :</span> ${HS[p.housing_status]||HS.cherche}<br>
     <span class="mut">École :</span> ${esc(p.school||"—")} (${esc(p.school_city)})<br>
     <span class="mut">Entreprise :</span> ${esc(p.company_city||"—")}<br>
     <span class="mut">Email :</span> ${p.email?`<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>`:"—"}<br>
