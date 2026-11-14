@@ -67,7 +67,7 @@ const TEAM = ["Guillaume","Etienne"];
 const HS = {a:"🏠 A un logement", cherche:"🔍 Cherche un logement", indecis:"❔ Pas décidé", non:"⛔ Ne cherche pas"};
 
 let KEY=null, who="", people=[], matches=[], activity=[], picked=[], openMatch=null, draft=null, city="", curCity="";
-let tab="inbox", flt={mine:"all",status:"",city:"",q:""}, yearStart = new Date().getMonth()>=7 ? new Date().getFullYear() : new Date().getFullYear()-1;
+let showHelp=false, tab="inbox", flt={mine:"all",status:"",city:"",q:""}, yearStart = new Date().getMonth()>=7 ? new Date().getFullYear() : new Date().getFullYear()-1;
 
 async function rpc(fn, args={}){
   const {data,error} = await sb.rpc(fn,{k:KEY,...args});
@@ -155,12 +155,13 @@ function header(){
   document.title = (n?`(${n}) `:"")+"Planning alternants · Cohabite";
   const t=(k,l,b)=>`<button class="tab ${tab===k?"on":""}" data-tab="${k}">${l}${b?`<span class="badge">${b}</span>`:""}</button>`;
   return `<header><h1>Cohabite <b>planning</b></h1>
-  ${t("inbox","À traiter",n)}${t("personnes","Personnes")}${t("calendrier","Calendrier")}${t("matchs","Matchs",matches.length)}${t("stats","Tableau de bord")}
-  <span style="flex:1"></span><span class="mut">${esc(who)||""}</span>
+  ${t("inbox","À traiter",n)}${t("personnes","Inscrits")}${t("matchs","Matchs",matches.length)}${t("stats","Chiffres")}${t("calendrier","Calendrier")}
+  <span style="flex:1"></span><span class="mut">${esc(who)||""}</span><button class="sec" id="help" title="Comment ça marche ?">?</button>
   ${["personnes","calendrier"].includes(tab)?`<button class="sec" id="py">◀</button><b>${yearLabel()}</b><button class="sec" id="ny">▶</button>`:""}
-  </header>`;
+  </header>${showHelp?helpBox():""}`;
 }
-function bindHeader(){
+function helpBox(){ return `<main style="padding-bottom:0"><div class="card" style="border-color:var(--co)"><b>Comment ça marche</b><ol style="margin:8px 0 0;padding-left:20px;line-height:1.7"><li>Quelqu'un s'inscrit sur cohabite.fr : sa fiche arrive ici toute seule, dans <b>À traiter</b>.</li><li>Clique <b>✉️ Répondre</b> : le message est prêt, il ne reste qu'à l'envoyer.</li><li>Ouvre <b>match possible</b> : si deux alternants ne sont jamais dans la ville en même temps, clique <b>✓ Valider ce match</b>.</li><li>Suis ensuite le match dans l'onglet <b>Matchs</b>, jusqu'au logement. Les statuts se mettent à jour tout seuls.</li></ol><div class="bar" style="margin:10px 0 0"><button class="sec" id="helpclose">Compris</button></div></div></main>`; }
+function bindHeader(){ const h=document.getElementById("help"); if(h) h.onclick=()=>{showHelp=!showHelp;render()}; const hc=document.getElementById("helpclose"); if(hc) hc.onclick=()=>{showHelp=false;render()};
   document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{tab=b.dataset.tab;render()});
   const py=document.getElementById("py"); if(py){py.onclick=()=>{yearStart--;render()}; document.getElementById("ny").onclick=()=>{yearStart++;render()}}
 }
@@ -177,11 +178,11 @@ function visible(p){
 }
 function filterBar(){
   const cs=new Map(); people.forEach(p=>[p.school_city,p.company_city].forEach(c=>{if(c&&c.trim())cs.set(norm(c),c.trim())}));
-  return `<div class="bar">
+  return `<details class="card" style="padding:10px 14px"${flt.q||flt.mine!=="all"||flt.status||flt.city?" open":""}><summary class="mut" style="cursor:pointer">🔎 Rechercher et filtrer</summary><div class="bar" style="margin-top:10px">
     <input id="f_q" placeholder="Rechercher (nom, email, école, ville)" value="${esc(flt.q)}" style="flex:1;min-width:180px">
     <select id="f_mine"><option value="all">Tous les dossiers</option><option value="mine" ${flt.mine==="mine"?"selected":""}>Mes dossiers</option><option value="none" ${flt.mine==="none"?"selected":""}>Non attribués</option></select>
     <select id="f_status"><option value="">Tous les statuts</option>${Object.entries(ST).map(([k,v])=>`<option value="${k}" ${flt.status===k?"selected":""}>${v}</option>`).join("")}</select>
-    <select id="f_city"><option value="">Toutes les villes</option>${[...cs.entries()].sort((a,b)=>a[1].localeCompare(b[1])).map(([k,l])=>`<option value="${k}" ${flt.city===k?"selected":""}>${esc(l)}</option>`).join("")}</select></div>`;
+    <select id="f_city"><option value="">Toutes les villes</option>${[...cs.entries()].sort((a,b)=>a[1].localeCompare(b[1])).map(([k,l])=>`<option value="${k}" ${flt.city===k?"selected":""}>${esc(l)}</option>`).join("")}</select></div></details>`;
 }
 function bindFilters(){
   const q=document.getElementById("f_q"); if(!q) return;
@@ -201,18 +202,16 @@ function renderInbox(){
   const waiting=people.filter(p=>p.status==="reponse_envoyee"&&visible(p));
   const card=p=>{
     const cs=candidatesFor(p).slice(0,3), c=p.school_city;
-    return `<div class="card"><div class="row"><div><b>${esc(fullName(p))}</b> <span class="st ${p.status}">${ST[p.status]}</span>
-      ${late(p)?'<span class="late"> ⏰ sans réponse depuis plus de 48 h</span>':""}<br>
-      <span class="mut">${esc(p.school||"—")} · ${esc(p.school_city)}${p.company_city?" / "+esc(p.company_city):""} · ${HS[p.school_housing]||HS.cherche}${p.budget_max?" · budget "+p.budget_max+" €":""}${p.move_in?" · "+esc(MOVE[p.move_in]||p.move_in):""}${p.end_date?" · fin le "+fmtD(p.end_date):""}<br>
-      Inscrit ${ago(p.created_at)}${p.source?" · source "+esc(p.source):""}${p.assigned_to?" · attribué à <b>"+esc(p.assigned_to)+"</b>":""}</span></div>
-      <div class="list">${p.assigned_to===who?"":`<button data-take="${p.id}">Je m'en occupe</button>`}${mailBtn(p,"ack",c,"✉️ Réponse prête","")}<button class="sec" data-edit="${p.id}">Ouvrir la fiche</button></div></div>
-      <div style="margin-top:10px">${cs.length?cs.map(m=>`<span class="pair ${m.common?"part":""}">${m.ideal?"⭐ ":""}${m.kind==="total"?"Match total":"Match partiel ("+m.common+" sem.)"} avec <b>${esc(fullName(m.q))}</b> à ${esc(m.city)}${m.notes.length?" <small>· "+esc(m.notes.join(" · "))+"</small>":""}
-        <button class="sec" data-match="${p.id}|${m.q.id}|${esc(m.city)}" style="padding:2px 8px">✓ Valider</button> ${mailBtn(p,m.kind,m.city,"✉️ "+esc(p.first_name))} ${mailBtn(m.q,m.kind,m.city,"✉️ "+esc(m.q.first_name))}</span>`).join(""):`<span class="mut">Aucun match pour l'instant.</span> ${mailBtn(p,"refus",c,"✉️ Annoncer qu'il n'y a pas encore de match")}`}</div></div>`;
+    const meta=[esc(p.school_city)+(p.company_city?" / "+esc(p.company_city):""),p.budget_max?p.budget_max+" €":"",p.end_date?"fin "+fmtD(p.end_date):"",p.assigned_to?"👤 "+esc(p.assigned_to):""].filter(Boolean).join(" · ");
+    return `<div class="card"><div class="row"><div><b style="font-size:16px">${esc(fullName(p))}</b>${late(p)?' <span class="late">⏰ en retard</span>':""}<br><span class="mut">${meta} · inscrit ${ago(p.created_at)}</span></div>
+      <div class="list">${mailBtn(p,"ack",c,"✉️ Répondre","")}${p.assigned_to===who?"":`<button class="sec" data-take="${p.id}">Je m'en occupe</button>`}<button class="sec" data-edit="${p.id}">Fiche</button></div></div>
+      ${cs.length?`<details style="margin-top:10px"><summary style="cursor:pointer;color:var(--ok);font-weight:600">🤝 ${cs.length} match${cs.length>1?"s":""} possible${cs.length>1?"s":""}</summary>${cs.map(m=>`<div style="margin-top:8px"><span class="pair ${m.common?"part":""}">${m.ideal?"⭐ ":""}<b>${esc(fullName(m.q))}</b> à ${esc(m.city)} <small>· ${m.kind==="total"?"jamais là en même temps":"quelques semaines en commun"}${m.notes.length?" · "+esc(m.notes.join(" · ")):""}</small></span>
+        <button class="sec" data-match="${p.id}|${m.q.id}|${esc(m.city)}">✓ Valider ce match</button> ${mailBtn(p,m.kind,m.city,"✉️ "+esc(p.first_name))} ${mailBtn(m.q,m.kind,m.city,"✉️ "+esc(m.q.first_name))}</div>`).join("")}</details>`:`<div class="mut" style="margin-top:8px">Pas encore de match. ${mailBtn(p,"refus",c,"✉️ Prévenir qu'on cherche encore")}</div>`}</div>`;
   };
   $app.innerHTML = header()+`<main>${filterBar()}
-    <div class="card" style="border-color:var(--co)"><b>À traiter (${list.length})</b> <span class="mut">— inscrits sans réponse envoyée, les plus anciens d'abord.</span></div>
-    ${list.map(card).join("")||'<div class="card mut">Rien à traiter. 🎉</div>'}
-    ${waiting.length?`<div class="card"><b>Réponse envoyée, match à chercher (${waiting.length})</b>${waiting.map(p=>{const cs=candidatesFor(p);return `<div class="row" style="margin-top:8px"><span>${esc(fullName(p))} <small>· ${esc(p.school_city)} · ${ago(p.replied_at||p.created_at)}</small> ${cs.length?`<span class="pair">${cs.length} candidat${cs.length>1?"s":""}</span>`:""}</span><span class="list">${mailBtn(p,"relance",p.school_city,"✉️ Relancer")}<button class="sec" data-edit="${p.id}">Fiche</button></span></div>`}).join("")}</div>`:""}
+    <h2 style="margin:4px 0 12px;font-size:17px">À traiter <span class="badge" style="margin-left:6px">${list.length}</span></h2>
+    ${list.map(card).join("")||'<div class="card mut">🎉 Tout est traité. La prochaine inscription apparaîtra ici toute seule.</div>'}
+    ${waiting.length?`<details class="card"><summary style="cursor:pointer;font-weight:600">En attente d'un match (${waiting.length})</summary>${waiting.map(p=>{const cs=candidatesFor(p);return `<div class="row" style="margin-top:8px"><span>${esc(fullName(p))} <small>· ${esc(p.school_city)} · ${ago(p.replied_at||p.created_at)}</small> ${cs.length?`<span class="pair">${cs.length} candidat${cs.length>1?"s":""}</span>`:""}</span><span class="list">${mailBtn(p,"relance",p.school_city,"✉️ Relancer")}<button class="sec" data-edit="${p.id}">Fiche</button></span></div>`}).join("")}</details>`:""}
   </main>`;
   bindHeader(); bindFilters(); bindMail(); bindCommon();
 }
@@ -250,35 +249,36 @@ function renderPeople(){
     : t ? `<div class="pair part" style="display:block;margin:0 0 10px">💡 Des personnes de ${esc(d.school)} ${esc(d.school_year)} ont déjà un planning. <button class="sec" id="tpl" style="padding:2px 8px">Appliquer ce planning</button></div>` : "";
   const shown = people.filter(visible);
   $app.innerHTML = header() + `<main>${filterBar()}
-  <div class="card"><div class="bar"><b>Personnes (${shown.length}/${people.length})</b><button id="new">+ Nouvelle personne</button></div>
+  <div class="card"><div class="bar"><b>Inscrits (${shown.length}/${people.length})</b><button id="new">+ Nouvelle personne</button></div>
     <div class="list">${shown.map(p=>`<span class="chip ${d&&d.id===p.id?"on":""}" data-edit="${p.id}">${matches.some(m=>m.person_a===p.id||m.person_b===p.id)?"🤝":hsBoth(p)} ${esc(fullName(p))} <small style="color:inherit;opacity:.7">· ${(ST[p.status]||"").split(" ")[0]} ${p.school?esc(p.school)+" · ":""}${esc(p.school_city)}${p.company_city?" / "+esc(p.company_city):""}${p.assigned_to?" · "+esc(p.assigned_to):""}</small> <b class="xdel" data-del="${p.id}" title="Supprimer" style="margin-left:6px;opacity:.6">✕</b></span>`).join("")||'<span class="mut">Personne pour l\'instant.</span>'}</div></div>
   ${d?`<div class="card"><div class="row"><b>${d.id?"Modifier":"Nouvelle personne"}</b>${d.id?`<span>${["ack","relance"].map(k=>mailBtn(d,k,d.school_city,k==="ack"?"✉️ Réponse prête":"✉️ Relance")).join(" ")}</span>`:""}</div>
     <div class="grid" style="margin:10px 0">
       <label>Prénom<input id="f_first" value="${esc(d.first_name)}"></label>
       <label>Nom<input id="f_last" value="${esc(d.last_name==="-"?"":d.last_name)}"></label>
-      <label>École<input id="f_school" value="${esc(d.school)}" placeholder="ex. ICAM"></label>
-      <label>Année / promo<input id="f_year" value="${esc(d.school_year)}" placeholder="ex. 3e année"></label>
-      <label>Ville de l'école<input id="f_sc" value="${esc(d.school_city)}"></label>
-      <label>Ville de l'entreprise<input id="f_cc" value="${esc(d.company_city)}"></label>
-      <label>Logement — ville de l'école<select id="f_hs1">${Object.entries(HS).map(([k,v])=>`<option value="${k}" ${(d.school_housing||"cherche")===k?"selected":""}>${v}</option>`).join("")}</select></label>
-      <label>Logement — ville de l'entreprise<select id="f_hs2">${Object.entries(HS).map(([k,v])=>`<option value="${k}" ${(d.company_housing||"cherche")===k?"selected":""}>${v}</option>`).join("")}</select></label>
       <label>Email<input id="f_email" type="email" value="${esc(d.email)}"></label>
       <label>Téléphone<input id="f_phone" value="${esc(d.phone)}"></label>
+      <label>Ville de l'école<input id="f_sc" value="${esc(d.school_city)}"></label>
+      <label>Ville de l'entreprise<input id="f_cc" value="${esc(d.company_city)}"></label>
       <label>Statut<select id="f_status2">${Object.entries(ST).map(([k,v])=>`<option value="${k}" ${(d.status||"nouveau")===k?"selected":""}>${v}</option>`).join("")}</select></label>
-      <label>Responsable<select id="f_assign"><option value="">— personne —</option>${TEAM.map(x=>`<option ${d.assigned_to===x?"selected":""}>${x}</option>`).join("")}</select></label>
+      <label>Responsable<select id="f_assign"><option value="">— personne —</option>${TEAM.map(x=>`<option ${d.assigned_to===x?"selected":""}>${x}</option>`).join("")}</select></label></div>
+    <details style="margin-bottom:12px"><summary class="mut" style="cursor:pointer">Plus de détails (école, logement, budget, arrivée, fin, notes)</summary>
+      <div class="grid" style="margin-top:10px">
+      <label>École<input id="f_school" value="${esc(d.school)}" placeholder="ex. ICAM"></label>
+      <label>Année / promo<input id="f_year" value="${esc(d.school_year)}" placeholder="ex. 3e année"></label>
+      <label>Logement — ville de l'école<select id="f_hs1">${Object.entries(HS).map(([k,v])=>`<option value="${k}" ${(d.school_housing||"cherche")===k?"selected":""}>${v}</option>`).join("")}</select></label>
+      <label>Logement — ville de l'entreprise<select id="f_hs2">${Object.entries(HS).map(([k,v])=>`<option value="${k}" ${(d.company_housing||"cherche")===k?"selected":""}>${v}</option>`).join("")}</select></label>
       <label>Budget max (€/mois)<input id="f_budget" type="number" min="0" value="${esc(d.budget_max)}"></label>
       <label>Fin de l'alternance<input id="f_end" type="date" value="${esc(d.end_date||"")}"></label>
       <label>Arrivée souhaitée<select id="f_move"><option value="">—</option>${Object.entries(MOVE).map(([k,v])=>`<option value="${k}" ${d.move_in===k?"selected":""}>${v}</option>`).join("")}</select></label>
-      <label style="grid-column:1/-1">Notes<input id="f_notes" value="${esc(d.notes)}"></label></div>
+      <label style="grid-column:1/-1">Notes<input id="f_notes" value="${esc(d.notes)}"></label></div></details>
     ${tplInfo}
     <div class="bar"><b>Rythme ${yearLabel()}</b> — clique sur les semaines <u>à l'école</u> (le reste = entreprise)
       <span class="leg"><i style="background:var(--ec)"></i>École<i style="background:var(--en)"></i>Entreprise</span></div>
-    <div class="bar mut">Remplissage rapide :
+    <details style="margin:0 0 8px"><summary class="mut" style="cursor:pointer">Remplissage rapide (ex. 2 semaines école / 2 semaines entreprise)</summary><div class="bar mut" style="margin-top:8px">
       <input id="g_s" type="number" min="1" value="2" style="width:60px"> sem. école puis
       <input id="g_c" type="number" min="1" value="2" style="width:60px"> sem. entreprise, à partir de la semaine du
       <input id="g_d" type="date" value="${iso(ws[0])}">
-      <button class="sec" id="gen">Appliquer</button><button class="sec" id="clr">Tout vider</button></div>
-    <div class="months" id="months">${monthsHtml}</div>
+      <button class="sec" id="gen">Appliquer</button><button class="sec" id="clr">Tout vider</button></div></details>    <div class="months" id="months">${monthsHtml}</div>
     <button id="save">Enregistrer</button> <button class="sec" id="cancel">Fermer</button> ${d.id?'<button class="del" id="del">Supprimer</button>':""}
     ${d.id?`<div style="margin-top:16px"><b>Journal</b>
       <div class="bar" style="margin:8px 0"><input id="j_note" placeholder="Ajouter une note au journal" style="flex:1"><button class="sec" id="j_add">Ajouter</button></div>${journal(d.id)}</div>`:""}
@@ -358,8 +358,8 @@ function renderCal(){
   $app.innerHTML = header()+`<main>
   <div class="card"><div class="bar"><b>Ville :</b>
     <div class="list">${cities.map(([k,l])=>`<span class="chip ${k===city?"on":""}" data-city="${k}">${esc(l)}</span>`).join("")||'<span class="mut">Ajoute d\'abord des personnes.</span>'}</div></div></div>
-  ${city?`<div class="card"><b>✅ Ça matche (jamais là en même temps)</b><div style="margin-top:8px">${perfect.map(lbl).join("")||'<span class="mut">Aucune paire compatible pour l\'instant.</span>'}</div>
-    ${close.length?`<div class="mut" style="margin-top:10px">Presque (4 semaines en commun ou moins) :</div>${close.map(lbl).join("")}`:""}</div>
+  ${city?`<div class="card"><b>✅ Compatibles : jamais dans la ville en même temps</b><div style="margin-top:8px">${perfect.map(lbl).join("")||'<span class="mut">Aucune paire compatible pour l\'instant.</span>'}</div>
+    ${close.length?`<div class="mut" style="margin-top:10px">Presque compatibles (4 semaines en commun ou moins) :</div>${close.map(lbl).join("")}`:""}</div>
   <div class="card" style="border-color:var(--ec)"><div class="bar"><b>🤝 Matcher à la main</b>
     <span class="mut">Coche deux personnes dans le calendrier (clique sur leur nom), même si le match est imparfait.</span></div>
     <div class="bar" style="margin:0">${pk.length?pk.map(p=>`<span class="pair">${esc(fullName(p))}</span>`).join(" + "):'<span class="mut">Aucune personne cochée.</span>'}${pkInfo}
