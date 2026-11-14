@@ -95,8 +95,13 @@ const late = p => p.status==="nouveau" && ageH(p)>48;
 const pending = () => people.filter(p=>p.status==="nouveau");
 
 /* ---------- Correspondances : candidats pour une personne (même logique que le site) ---------- */
+// On ne compare que les semaines à venir, et seulement jusqu'à la première date de fin d'alternance des deux personnes.
+const endOf = p => p.end_date ? new Date(p.end_date+"T23:59") : null;
+const fmtD = t => new Date(t).toLocaleDateString("fr-FR");
+function span(a,b){ const m=mondayOf(new Date()), ea=endOf(a), eb=endOf(b); return weeks().filter(w=>w>=m&&(!ea||w<=ea)&&(!eb||w<=eb)); }
+const MIN_OVERLAP = 6; // semaines minimum de période commune pour proposer un match
 function candidatesFor(p){
-  const ws=weeks(); const cities=new Map();
+  const ws=weeks(); const cities=new Map(); const ep=endOf(p); if(ep&&ep<new Date()) return [];
   [p.school_city,p.company_city].forEach(c=>{if(c&&c.trim())cities.set(norm(c),c.trim())});
   const out=[];
   for(const [c,label] of cities){
@@ -105,12 +110,14 @@ function candidatesFor(p){
     if(taken.has(p.id)) continue;
     for(const q of people){
       if(q.id===p.id||taken.has(q.id)||housIn(q,c)==="non"||["abandon","loge"].includes(q.status)) continue;
-      if(!ws.some(w=>cityAt(q,w)===c)) continue;
-      const common=ws.filter(w=>cityAt(p,w)===c&&cityAt(q,w)===c).length;
+      const sp=span(p,q); if(sp.length<MIN_OVERLAP) continue;
+      if(!sp.some(w=>cityAt(q,w)===c)||!sp.some(w=>cityAt(p,w)===c)) continue;
+      const common=sp.filter(w=>cityAt(p,w)===c&&cityAt(q,w)===c).length;
       if(common>4) continue;
       const notes=[]; if(isIdeal(p,q,c)) notes.push("l'un a un logement, l'autre cherche");
       if(p.budget_max&&q.budget_max&&Math.abs(p.budget_max-q.budget_max)<=60) notes.push(`budgets proches (${p.budget_max} € / ${q.budget_max} €)`);
       if(p.move_in&&p.move_in===q.move_in) notes.push("même arrivée souhaitée");
+      if(p.end_date||q.end_date) notes.push("période commune jusqu'au "+fmtD(Math.min(...[endOf(p),endOf(q)].filter(Boolean))));
       out.push({q,city:label,common,kind:common===0?"total":"partiel",ideal:isIdeal(p,q,c),notes});
     }
   }
@@ -196,7 +203,7 @@ function renderInbox(){
     const cs=candidatesFor(p).slice(0,3), c=p.school_city;
     return `<div class="card"><div class="row"><div><b>${esc(fullName(p))}</b> <span class="st ${p.status}">${ST[p.status]}</span>
       ${late(p)?'<span class="late"> ⏰ sans réponse depuis plus de 48 h</span>':""}<br>
-      <span class="mut">${esc(p.school||"—")} · ${esc(p.school_city)}${p.company_city?" / "+esc(p.company_city):""} · ${HS[p.school_housing]||HS.cherche}${p.budget_max?" · budget "+p.budget_max+" €":""}${p.move_in?" · "+esc(MOVE[p.move_in]||p.move_in):""}<br>
+      <span class="mut">${esc(p.school||"—")} · ${esc(p.school_city)}${p.company_city?" / "+esc(p.company_city):""} · ${HS[p.school_housing]||HS.cherche}${p.budget_max?" · budget "+p.budget_max+" €":""}${p.move_in?" · "+esc(MOVE[p.move_in]||p.move_in):""}${p.end_date?" · fin le "+fmtD(p.end_date):""}<br>
       Inscrit ${ago(p.created_at)}${p.source?" · source "+esc(p.source):""}${p.assigned_to?" · attribué à <b>"+esc(p.assigned_to)+"</b>":""}</span></div>
       <div class="list">${p.assigned_to===who?"":`<button data-take="${p.id}">Je m'en occupe</button>`}${mailBtn(p,"ack",c,"✉️ Réponse prête","")}<button class="sec" data-edit="${p.id}">Ouvrir la fiche</button></div></div>
       <div style="margin-top:10px">${cs.length?cs.map(m=>`<span class="pair ${m.common?"part":""}">${m.ideal?"⭐ ":""}${m.kind==="total"?"Match total":"Match partiel ("+m.common+" sem.)"} avec <b>${esc(fullName(m.q))}</b> à ${esc(m.city)}${m.notes.length?" <small>· "+esc(m.notes.join(" · "))+"</small>":""}
@@ -260,6 +267,7 @@ function renderPeople(){
       <label>Statut<select id="f_status2">${Object.entries(ST).map(([k,v])=>`<option value="${k}" ${(d.status||"nouveau")===k?"selected":""}>${v}</option>`).join("")}</select></label>
       <label>Responsable<select id="f_assign"><option value="">— personne —</option>${TEAM.map(x=>`<option ${d.assigned_to===x?"selected":""}>${x}</option>`).join("")}</select></label>
       <label>Budget max (€/mois)<input id="f_budget" type="number" min="0" value="${esc(d.budget_max)}"></label>
+      <label>Fin de l'alternance<input id="f_end" type="date" value="${esc(d.end_date||"")}"></label>
       <label>Arrivée souhaitée<select id="f_move"><option value="">—</option>${Object.entries(MOVE).map(([k,v])=>`<option value="${k}" ${d.move_in===k?"selected":""}>${v}</option>`).join("")}</select></label>
       <label style="grid-column:1/-1">Notes<input id="f_notes" value="${esc(d.notes)}"></label></div>
     ${tplInfo}
@@ -283,7 +291,7 @@ function renderPeople(){
     const p=people.find(x=>x.id===el.dataset.del); if(!confirm("Supprimer "+fullName(p)+" (et ses matchs) ?"))return;
     await rpc("pa_delete_person",{pid:p.id}); if(draft&&draft.id===p.id)draft=null; await reload()});
   if(!d) return;
-  const sync=()=>{d.first_name=f_first.value;d.last_name=f_last.value;d.school=f_school.value;d.school_year=f_year.value;d.school_city=f_sc.value;d.company_city=f_cc.value;d.school_housing=f_hs1.value;d.company_housing=f_hs2.value;d.email=f_email.value;d.phone=f_phone.value;d.notes=f_notes.value;d.status=f_status2.value;d.assigned_to=f_assign.value;d.budget_max=f_budget.value;d.move_in=f_move.value};
+  const sync=()=>{d.first_name=f_first.value;d.last_name=f_last.value;d.school=f_school.value;d.school_year=f_year.value;d.school_city=f_sc.value;d.company_city=f_cc.value;d.school_housing=f_hs1.value;d.company_housing=f_hs2.value;d.email=f_email.value;d.phone=f_phone.value;d.notes=f_notes.value;d.status=f_status2.value;d.assigned_to=f_assign.value;d.budget_max=f_budget.value;d.move_in=f_move.value;d.end_date=f_end.value};
   const tryTpl=()=>{sync(); const t=tplFor(d,ws); if(t&&!d.id&&!hasWeeks(d,ws)) applyTpl(d,ws,t); render()};
   f_school.onchange=tryTpl; f_year.onchange=tryTpl;
   const tb=document.getElementById("tpl"); if(tb) tb.onclick=()=>{sync(); applyTpl(d,ws,tplFor(d,ws)); render()};
@@ -308,7 +316,7 @@ function renderPeople(){
   const ja=document.getElementById("j_add"); if(ja) ja.onclick=async()=>{const v=j_note.value.trim(); if(!v)return; await rpc("pa_log",{pid:d.id,kind:"note",detail:v,actor:actor()}); sync(); await load(); render()};
   document.getElementById("save").onclick=async()=>{sync();
     if(!d.first_name.trim()||!d.school_city.trim()) return alert("Prénom et ville de l'école sont obligatoires.");
-    const row={id:d.id||null,first_name:d.first_name.trim(),last_name:d.last_name.trim()||"-",school:d.school.trim()||null,school_year:d.school_year.trim()||null,school_housing:d.school_housing||"cherche",company_housing:d.company_housing||"cherche",school_city:d.school_city.trim(),company_city:d.company_city.trim()||null,school_weeks:d.school_weeks,email:d.email.trim()||null,phone:d.phone.trim()||null,notes:d.notes.trim()||null,status:d.status||"nouveau",assigned_to:d.assigned_to||"",budget_max:d.budget_max===""||d.budget_max==null?"":String(d.budget_max),move_in:d.move_in||"",actor:actor()};
+    const row={id:d.id||null,first_name:d.first_name.trim(),last_name:d.last_name.trim()||"-",school:d.school.trim()||null,school_year:d.school_year.trim()||null,school_housing:d.school_housing||"cherche",company_housing:d.company_housing||"cherche",school_city:d.school_city.trim(),company_city:d.company_city.trim()||null,school_weeks:d.school_weeks,email:d.email.trim()||null,phone:d.phone.trim()||null,notes:d.notes.trim()||null,status:d.status||"nouveau",assigned_to:d.assigned_to||"",budget_max:d.budget_max===""||d.budget_max==null?"":String(d.budget_max),move_in:d.move_in||"",end_date:d.end_date||"",actor:actor()};
     const was=people.find(x=>x.id===d.id);
     await rpc("pa_save_person",{r:row});
     if(was&&was.status!==row.status) await rpc("pa_set_status",{pid:d.id,st:row.status,actor:actor(),detail:null});
@@ -340,7 +348,7 @@ function renderCal(){
     const n=members.filter(p=>present(p,w)).length; return `<td class="c ${n===0?"free":n===1?"one":"two"}${iso(w)===thisMon?" today":""}" title="${n} pers."></td>`}).join("")}</tr>`;
   const pairs=[]; for(let i=0;i<members.length;i++)for(let j=i+1;j<members.length;j++){
     const a=members[i],b=members[j]; let common=0, covered=0;
-    ws.forEach(w=>{const pa=present(a,w),pb=present(b,w); if(pa&&pb)common++; if(pa||pb)covered++});
+    span(a,b).forEach(w=>{const pa=present(a,w),pb=present(b,w); if(pa&&pb)common++; if(pa||pb)covered++});
     pairs.push({a,b,common,covered})}
   pairs.sort((x,y)=>x.common-y.common||(isIdeal(y.a,y.b,city)-isIdeal(x.a,x.b,city))||y.covered-x.covered);
   const saved=new Set(matches.map(m=>[m.person_a,m.person_b].sort().join("|")+"|"+norm(m.city)));
@@ -418,6 +426,7 @@ function renderStats(){
     <div class="card"><b>Par ville d'école</b>${bars(count(people,p=>p.school_city).slice(0,10))}</div>
     <div class="card"><b>Par source</b>${bars(count(people,p=>p.source))}</div>
     <div class="card"><b>Matchs par étape</b>${bars(count(matches,m=>STEP[m.step]))}</div>
+    <div class="card"><b>Fins d'alternance dans les 60 jours</b><div style="margin-top:8px">${people.filter(p=>p.end_date&&!["loge","abandon"].includes(p.status)&&endOf(p)>new Date()&&endOf(p)-Date.now()<60*DAY).sort((a,b)=>endOf(a)-endOf(b)).map(p=>`${esc(fullName(p))} <small>· ${fmtD(p.end_date)}</small>`).join("<br>")||'<span class="mut">—</span>'}</div></div>
     <div class="card"><b>Charge par responsable</b>${bars(count(people.filter(p=>!["loge","abandon"].includes(p.status)),p=>p.assigned_to||"Non attribué"))}</div></div>
    <div class="card"><b>Sauvegarde et RGPD</b><div class="bar" style="margin-top:8px"><button id="csv">⬇️ Exporter les inscrits (CSV)</button>
     <button class="sec" id="purge" ${old?"":"disabled"}>🧹 Supprimer les dossiers terminés de plus de 24 mois (${old})</button></div>
