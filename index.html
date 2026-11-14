@@ -194,7 +194,8 @@ function bindFilters(){
 
 /* ---------- Journal ---------- */
 const KIND = {inscription:"Inscription",statut:"Statut",assignation:"Attribué à",note:"Note",match:"Match",email_ack:"Réponse envoyée",email_total:"Match proposé (total)",email_partiel:"Match proposé (partiel)",email_relance:"Relance envoyée",email_refus:"Pas de match annoncé"};
-const journal = pid => activity.filter(a=>a.person_id===pid).slice(0,15).map(a=>`<div class="jr"><b>${esc(KIND[a.kind]||a.kind)}</b> ${a.detail?"· "+esc(ST[a.detail.split(" · ")[0]]||a.detail):""} <small>· ${esc(a.actor)} · ${ago(a.created_at)}</small></div>`).join("")||'<span class="mut">Rien pour l\'instant.</span>';
+const fmtDetail = d => { const [a,...r]=String(d).split(" · "); return ST[a]?ST[a]+(r.length?" · "+r.join(" · "):""):d; };
+const journal = pid => activity.filter(a=>a.person_id===pid).slice(0,15).map(a=>`<div class="jr"><b>${esc(KIND[a.kind]||a.kind)}</b> ${a.detail?"· "+esc(fmtDetail(a.detail)):""} <small>· ${esc(a.actor)} · ${ago(a.created_at)}</small></div>`).join("")||'<span class="mut">Rien pour l\'instant.</span>';
 
 /* ---------- Onglet À traiter ---------- */
 function renderInbox(){
@@ -204,7 +205,7 @@ function renderInbox(){
     const cs=candidatesFor(p).slice(0,3), c=p.school_city;
     const meta=[esc(p.school_city)+(p.company_city?" / "+esc(p.company_city):""),p.budget_max?p.budget_max+" €":"",p.end_date?"fin "+fmtD(p.end_date):"",p.assigned_to?"👤 "+esc(p.assigned_to):""].filter(Boolean).join(" · ");
     return `<div class="card"><div class="row"><div><b style="font-size:16px">${esc(fullName(p))}</b>${late(p)?' <span class="late">⏰ en retard</span>':""}<br><span class="mut">${meta} · inscrit ${ago(p.created_at)}</span></div>
-      <div class="list">${mailBtn(p,"ack",c,"✉️ Répondre","")}${p.assigned_to===who?"":`<button class="sec" data-take="${p.id}">Je m'en occupe</button>`}<button class="sec" data-edit="${p.id}">Fiche</button></div></div>
+      <div class="list">${mailBtn(p,"ack",c,"✉️ Répondre","")}<button class="sec" data-replied="${p.id}">✓ Déjà répondu</button>${p.assigned_to===who?"":`<button class="sec" data-take="${p.id}">Je m'en occupe</button>`}<button class="sec" data-edit="${p.id}">Fiche</button></div></div>
       ${cs.length?`<details style="margin-top:10px"><summary style="cursor:pointer;color:var(--ok);font-weight:600">🤝 ${cs.length} match${cs.length>1?"s":""} possible${cs.length>1?"s":""}</summary>${cs.map(m=>`<div style="margin-top:8px"><span class="pair ${m.common?"part":""}">${m.ideal?"⭐ ":""}<b>${esc(fullName(m.q))}</b> à ${esc(m.city)} <small>· ${m.kind==="total"?"jamais là en même temps":"quelques semaines en commun"}${m.notes.length?" · "+esc(m.notes.join(" · ")):""}</small></span>
         <button class="sec" data-match="${p.id}|${m.q.id}|${esc(m.city)}">✓ Valider ce match</button> ${mailBtn(p,m.kind,m.city,"✉️ "+esc(p.first_name))} ${mailBtn(m.q,m.kind,m.city,"✉️ "+esc(m.q.first_name))}</div>`).join("")}</details>`:`<div class="mut" style="margin-top:8px">Pas encore de match. ${mailBtn(p,"refus",c,"✉️ Prévenir qu'on cherche encore")}</div>`}</div>`;
   };
@@ -216,6 +217,11 @@ function renderInbox(){
   bindHeader(); bindFilters(); bindMail(); bindCommon();
 }
 function bindCommon(){
+  // « Déjà répondu » : pour les réponses faites hors de l'outil (WhatsApp, appel, email écrit à la main).
+  document.querySelectorAll("[data-replied]").forEach(b=>b.onclick=async()=>{
+    const note=prompt("Comment as-tu répondu ? (facultatif : email, WhatsApp, appel…)",""); if(note===null) return;
+    await rpc("pa_set_status",{pid:b.dataset.replied,st:"reponse_envoyee",actor:actor(),detail:note.trim()||"répondu hors de l'outil"});
+    await reload()});
   document.querySelectorAll("[data-take]").forEach(b=>b.onclick=async()=>{await rpc("pa_assign",{pid:b.dataset.take,w:who,actor:actor()});await reload()});
   document.querySelectorAll("[data-edit]").forEach(el=>el.onclick=()=>{const p=people.find(x=>x.id===el.dataset.edit);draft=JSON.parse(JSON.stringify(p));tab="personnes";render()});
   document.querySelectorAll("[data-match]").forEach(el=>el.onclick=async()=>{const [a,b,c]=el.dataset.match.split("|");
@@ -251,7 +257,7 @@ function renderPeople(){
   $app.innerHTML = header() + `<main>${filterBar()}
   <div class="card"><div class="bar"><b>Inscrits (${shown.length}/${people.length})</b><button id="new">+ Nouvelle personne</button></div>
     <div class="list">${shown.map(p=>`<span class="chip ${d&&d.id===p.id?"on":""}" data-edit="${p.id}">${matches.some(m=>m.person_a===p.id||m.person_b===p.id)?"🤝":hsBoth(p)} ${esc(fullName(p))} <small style="color:inherit;opacity:.7">· ${(ST[p.status]||"").split(" ")[0]} ${p.school?esc(p.school)+" · ":""}${esc(p.school_city)}${p.company_city?" / "+esc(p.company_city):""}${p.assigned_to?" · "+esc(p.assigned_to):""}</small> <b class="xdel" data-del="${p.id}" title="Supprimer" style="margin-left:6px;opacity:.6">✕</b></span>`).join("")||'<span class="mut">Personne pour l\'instant.</span>'}</div></div>
-  ${d?`<div class="card"><div class="row"><b>${d.id?"Modifier":"Nouvelle personne"}</b>${d.id?`<span>${["ack","relance"].map(k=>mailBtn(d,k,d.school_city,k==="ack"?"✉️ Réponse prête":"✉️ Relance")).join(" ")}</span>`:""}</div>
+  ${d?`<div class="card"><div class="row"><b>${d.id?"Modifier":"Nouvelle personne"}</b>${d.id?`<span>${["ack","relance"].map(k=>mailBtn(d,k,d.school_city,k==="ack"?"✉️ Réponse prête":"✉️ Relance")).join(" ")} <button class="sec" data-replied="${d.id}">✓ Déjà répondu</button></span>`:""}</div>
     <div class="grid" style="margin:10px 0">
       <label>Prénom<input id="f_first" value="${esc(d.first_name)}"></label>
       <label>Nom<input id="f_last" value="${esc(d.last_name==="-"?"":d.last_name)}"></label>
