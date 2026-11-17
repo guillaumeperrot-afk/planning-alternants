@@ -66,7 +66,7 @@ const MOVE = {asap:"Dès que possible","1-3-mois":"Dans 1 à 3 mois",rentree:"À
 const TEAM = ["Guillaume","Etienne"];
 const HS = {a:"🏠 A un logement", cherche:"🔍 Cherche un logement", indecis:"❔ Pas décidé", non:"⛔ Ne cherche pas"};
 
-let KEY=null, who="", people=[], matches=[], activity=[], picked=[], openMatch=null, draft=null, city="", curCity="";
+let KEY=null, who="", ccMail="", people=[], matches=[], activity=[], picked=[], openMatch=null, draft=null, city="", curCity="";
 let showHelp=false, tab="inbox", flt={mine:"all",status:"",city:"",q:""}, yearStart = new Date().getMonth()>=7 ? new Date().getFullYear() : new Date().getFullYear()-1;
 
 async function rpc(fn, args={}){
@@ -75,7 +75,7 @@ async function rpc(fn, args={}){
   return data;
 }
 async function load(){
-  const d = await rpc("pa_load"); people = d.people; matches = d.matches; activity = d.activity||[]; who = d.who||"";
+  const d = await rpc("pa_load"); people = d.people; matches = d.matches; activity = d.activity||[]; who = d.who||""; ccMail = d.cc||"";
 }
 const reload = async()=>{ await load(); render(); };
 const actor = () => who || "?";
@@ -133,7 +133,7 @@ const DR = {
   relance:(p,c)=>({s:"Ton inscription Cohabite est toujours active",b:`Bonjour ${p.first_name},\n\nOn revient vers toi : ton inscription à ${c} est toujours active. Ton rythme ou ton calendrier a-t-il changé ? Si oui, réponds simplement à ce message.`+SIGN}),
   refus:(p,c)=>({s:"Pas encore de match pour toi à "+c,b:`Bonjour ${p.first_name},\n\nPour le moment, nous n'avons pas d'alternant compatible avec ton rythme à ${c}. Ta demande reste enregistrée et on te prévient dès qu'un profil compatible s'inscrit.`+SIGN})
 };
-const mailHref = (p,kind,c) => { const d=DR[kind](p,c); return `mailto:${encodeURIComponent(p.email||"")}?subject=${encodeURIComponent(d.s)}&body=${encodeURIComponent(d.b)}`; };
+const mailHref = (p,kind,c) => { const d=DR[kind](p,c); return `mailto:${encodeURIComponent(p.email||"")}?${ccMail?`cc=${encodeURIComponent(ccMail)}&`:""}subject=${encodeURIComponent(d.s)}&body=${encodeURIComponent(d.b)}`; };
 const mailBtn = (p,kind,c,label,cls="sec") => p.email
   ? `<a class="btn ${cls}" href="${mailHref(p,kind,c)}" data-mail="${p.id}|${kind}" style="padding:4px 9px;font-size:13px">${label}</a>`
   : `<span class="mut" title="Pas d'email">${label} (pas d'email)</span>`;
