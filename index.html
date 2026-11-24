@@ -81,6 +81,8 @@ const reload = async()=>{ await load(); render(); };
 const actor = () => who || "?";
 
 function weeks(){ const out=[]; let d=mondayOf(new Date(yearStart,8,1)); const end=new Date(yearStart+1,8,1); while(d<end){out.push(d); d=addW(d,1)} return out; }
+// Seules les semaines à venir comptent : le passé ne doit jamais fausser les semaines en commun.
+const upcoming = () => { const m=mondayOf(new Date()); return weeks().filter(w=>w>=m); };
 const yearLabel = () => `${yearStart}-${yearStart+1}`;
 function cityAt(p, mon){ return norm((p.school_weeks||[]).includes(iso(mon)) ? p.school_city : p.company_city); }
 function housIn(p, c){ const sc=norm(p.school_city)===c, cc=norm(p.company_city)===c; const s1=p.school_housing||"cherche", s2=p.company_housing||"cherche";
@@ -101,7 +103,7 @@ const fmtD = t => new Date(t).toLocaleDateString("fr-FR");
 function span(a,b){ const m=mondayOf(new Date()), ea=endOf(a), eb=endOf(b); return weeks().filter(w=>w>=m&&(!ea||w<=ea)&&(!eb||w<=eb)); }
 const MIN_OVERLAP = 6; // semaines minimum de période commune pour proposer un match
 function candidatesFor(p){
-  const ws=weeks(); const cities=new Map(); const ep=endOf(p); if(ep&&ep<new Date()) return [];
+  const ws=upcoming(); const cities=new Map(); const ep=endOf(p); if(ep&&ep<new Date()) return [];
   [p.school_city,p.company_city].forEach(c=>{if(c&&c.trim())cities.set(norm(c),c.trim())});
   const out=[];
   for(const [c,label] of cities){
@@ -136,9 +138,18 @@ const DR = {
 };
 const needsCal = p => !(p.school_weeks||[]).length || /calendrier (estimé|non renseigné)/.test(p.notes||"");
 const mailHref = (p,kind,c) => { const d=DR[kind](p,c); return `mailto:${encodeURIComponent(p.email||"")}?${ccMail?`cc=${encodeURIComponent(ccMail)}&`:""}subject=${encodeURIComponent(d.s)}&body=${encodeURIComponent(d.b)}`; };
-const mailBtn = (p,kind,c,label,cls="sec") => p.email
-  ? `<a class="btn ${cls}" href="${mailHref(p,kind,c)}" data-mail="${p.id}|${kind}" style="padding:4px 9px;font-size:13px">${label}</a>`
-  : `<span class="mut" title="Pas d'email">${label} (pas d'email)</span>`;
+// Canal choisi dans l'en-tête (mémorisé sur cet ordinateur) : mail, WhatsApp ou SMS. Sans téléphone, on retombe sur le mail.
+let chan="mail"; try{ chan=localStorage.getItem("pa_chan")||"mail" }catch(e){}
+const CHAN = {mail:"✉️ Mail",wa:"💬 WhatsApp",sms:"📱 SMS"};
+const phoneIntl = ph => { const d=String(ph||"").replace(/[^\d+]/g,""); return d.startsWith("+")?d.slice(1):d.startsWith("00")?d.slice(2):d.startsWith("0")?"33"+d.slice(1):d; };
+const chanOf = p => (chan!=="mail"&&p.phone&&phoneIntl(p.phone).length>=9) ? chan : (p.email?"mail":(p.phone?"wa":"mail"));
+const contactHref = (p,kind,c) => { const ch=chanOf(p);
+  if(ch==="wa"){ const d=DR[kind](p,c); return `https://wa.me/${phoneIntl(p.phone)}?text=${encodeURIComponent(d.b)}`; }
+  if(ch==="sms"){ const d=DR[kind](p,c); return `sms:${encodeURIComponent(p.phone)}?&body=${encodeURIComponent(d.b)}`; }
+  return mailHref(p,kind,c); };
+const mailBtn = (p,kind,c,label,cls="sec") => (p.email||p.phone)
+  ? `<a class="btn ${cls}" href="${contactHref(p,kind,c)}" ${chanOf(p)==="mail"?"":'target="_blank" rel="noopener"'} data-mail="${p.id}|${kind}" style="padding:4px 9px;font-size:13px">${chanOf(p)==="mail"?label:label.replace("✉️",CHAN[chanOf(p)].split(" ")[0])}</a>`
+  : `<span class="mut" title="Ni email ni téléphone">${label} (pas de contact)</span>`;
 function bindMail(){
   document.querySelectorAll("[data-mail]").forEach(a=>a.addEventListener("click",()=>{
     const [pid,kind]=a.dataset.mail.split("|"); const p=people.find(x=>x.id===pid); if(!p) return;
@@ -158,12 +169,13 @@ function header(){
   const t=(k,l,b)=>`<button class="tab ${tab===k?"on":""}" data-tab="${k}">${l}${b?`<span class="badge">${b}</span>`:""}</button>`;
   return `<header><h1>Cohabite <b>planning</b></h1>
   ${t("inbox","À traiter",n)}${t("personnes","Inscrits")}${t("matchs","Matchs",matches.length)}${t("stats","Chiffres")}${t("calendrier","Calendrier")}
-  <span style="flex:1"></span><span class="mut">${esc(who)||""}</span><button class="sec" id="help" title="Comment ça marche ?">?</button>
+  <span style="flex:1"></span><label class="mut" title="Comment contacter les inscrits quand tu cliques sur un bouton de message">Contacter par <select id="chan">${Object.entries(CHAN).map(([k,v])=>`<option value="${k}" ${chan===k?"selected":""}>${v}</option>`).join("")}</select></label><span class="mut">${esc(who)||""}</span><button class="sec" id="help" title="Comment ça marche ?">?</button>
   ${["personnes","calendrier"].includes(tab)?`<button class="sec" id="py">◀</button><b>${yearLabel()}</b><button class="sec" id="ny">▶</button>`:""}
   </header>${showHelp?helpBox():""}`;
 }
 function helpBox(){ return `<main style="padding-bottom:0"><div class="card" style="border-color:var(--co)"><b>Comment ça marche</b><ol style="margin:8px 0 0;padding-left:20px;line-height:1.7"><li>Quelqu'un s'inscrit sur cohabite.fr : sa fiche arrive ici toute seule, dans <b>À traiter</b>.</li><li>Clique <b>✉️ Répondre</b> : le message est prêt, il ne reste qu'à l'envoyer.</li><li>Ouvre <b>match possible</b> : si deux alternants ne sont jamais dans la ville en même temps, clique <b>✓ Valider ce match</b>.</li><li>Suis ensuite le match dans l'onglet <b>Matchs</b>, jusqu'au logement. Les statuts se mettent à jour tout seuls.</li></ol><div class="bar" style="margin:10px 0 0"><button class="sec" id="helpclose">Compris</button></div></div></main>`; }
-function bindHeader(){ const h=document.getElementById("help"); if(h) h.onclick=()=>{showHelp=!showHelp;render()}; const hc=document.getElementById("helpclose"); if(hc) hc.onclick=()=>{showHelp=false;render()};
+function bindHeader(){ const ch=document.getElementById("chan"); if(ch) ch.onchange=()=>{chan=ch.value; try{localStorage.setItem("pa_chan",chan)}catch(e){} render()};
+  const h=document.getElementById("help"); if(h) h.onclick=()=>{showHelp=!showHelp;render()}; const hc=document.getElementById("helpclose"); if(hc) hc.onclick=()=>{showHelp=false;render()};
   document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{tab=b.dataset.tab;render()});
   const py=document.getElementById("py"); if(py){py.onclick=()=>{yearStart--;render()}; document.getElementById("ny").onclick=()=>{yearStart++;render()}}
 }
@@ -337,21 +349,21 @@ function renderCal(){
   people.forEach(p=>[p.school_city,p.company_city].forEach(c=>{if(c&&c.trim())cityMap[norm(c)] ||= c.trim()}));
   const cities = Object.entries(cityMap).sort((a,b)=>a[1].localeCompare(b[1]));
   if (!cities.some(([k])=>k===norm(city))) city = cities[0]?.[0] || "";
-  const ws = weeks(), thisMon = iso(mondayOf(new Date()));
+  const ws = weeks(), fw = upcoming(), thisMon = iso(mondayOf(new Date()));
   curCity = city;
   const present = (p,w)=>cityAt(p,w)===city;
   const taken = new Set(matches.filter(m=>norm(m.city)===city).flatMap(m=>[m.person_a,m.person_b]));
-  const members = people.filter(p=>!taken.has(p.id)&&housIn(p,city)!=="non"&&ws.some(w=>cityAt(p,w)===city));
+  const members = people.filter(p=>!taken.has(p.id)&&housIn(p,city)!=="non"&&fw.some(w=>cityAt(p,w)===city));
   picked = picked.filter(id=>members.some(p=>p.id===id));
   const pk = picked.map(id=>members.find(p=>p.id===id));
   let pkInfo = "";
-  if (pk.length===2){ let c=0; ws.forEach(w=>{ if(present(pk[0],w)&&present(pk[1],w)) c++ });
+  if (pk.length===2){ let c=0; span(pk[0],pk[1]).forEach(w=>{ if(present(pk[0],w)&&present(pk[1],w)) c++ });
     pkInfo = c? `<span class="mut"> (${c} sem. en commun : match imparfait)</span>` : `<span class="mut"> (aucune semaine en commun)</span>`; }
   let head="<tr><th></th>",prev=-1;
   ws.forEach(w=>{const m=w.getMonth(); head+= m!==prev?`<th class="mo">${w.toLocaleDateString("fr-FR",{month:"short"})}</th>`:`<th>${w.getDate()}</th>`; prev=m}); head+="</tr>";
   const rows = members.map(p=>`<tr class="${picked.includes(p.id)?"pick":""}"><td class="name" data-pick="${p.id}" style="cursor:pointer" title="Clique pour sélectionner">${picked.includes(p.id)?"☑ ":"☐ "}<b>${hsIcon(p)} ${esc(fullName(p))}</b><br><small>${esc(p.school||"")} · ${esc(p.school_city)}${p.company_city?" / "+esc(p.company_city):""}</small></td>${
     ws.map(w=>{const here=present(p,w); const sch=(p.school_weeks||[]).includes(iso(w));
-      return `<td class="c ${here?(sch?"p":"pn"):""}" title="${esc(p.first_name)} — ${w.toLocaleDateString("fr-FR")} : ${here?(sch?"école":"entreprise"):"ailleurs"}"></td>`}).join("")}</tr>`).join("");
+      return `<td class="c ${here?(sch?"p":"pn"):""}" ${w<mondayOf(new Date())?'style="opacity:.25"':""} title="${esc(p.first_name)} — ${w.toLocaleDateString("fr-FR")} : ${here?(sch?"école":"entreprise"):"ailleurs"}"></td>`}).join("")}</tr>`).join("");
   const sum = `<tr class="sum"><td class="name mut">Occupation (vert = libre / 1 pers., rouge = conflit)</td>${ws.map(w=>{
     const n=members.filter(p=>present(p,w)).length; return `<td class="c ${n===0?"free":n===1?"one":"two"}${iso(w)===thisMon?" today":""}" title="${n} pers."></td>`}).join("")}</tr>`;
   const pairs=[]; for(let i=0;i<members.length;i++)for(let j=i+1;j<members.length;j++){
@@ -361,7 +373,7 @@ function renderCal(){
   pairs.sort((x,y)=>x.common-y.common||(isIdeal(y.a,y.b,city)-isIdeal(x.a,x.b,city))||y.covered-x.covered);
   const saved=new Set(matches.map(m=>[m.person_a,m.person_b].sort().join("|")+"|"+norm(m.city)));
   const key=p=>[p.a.id,p.b.id].sort().join("|")+"|"+city;
-  const lbl=p=>`<span class="pair ${p.common?"part":""}">${isIdeal(p.a,p.b,city)?"⭐ ":""}${hsIcon(p.a)}${esc(fullName(p.a))} ⇄ ${hsIcon(p.b)}${esc(fullName(p.b))} <small>${isIdeal(p.a,p.b,city)?"un a un logement, l'autre cherche · ":(housIn(p.a,city)==="a"&&housIn(p.b,city)==="a")?"les deux ont un logement · ":""}${p.common?p.common+" sem. en commun":"aucune semaine en commun"} · ${p.covered}/${ws.length} sem. occupées</small> <button class="sec" data-match="${p.a.id}|${p.b.id}|${esc(cityMap[city])}" style="padding:2px 8px">✓ Valider</button></span>`;
+  const lbl=p=>`<span class="pair ${p.common?"part":""}">${isIdeal(p.a,p.b,city)?"⭐ ":""}${hsIcon(p.a)}${esc(fullName(p.a))} ⇄ ${hsIcon(p.b)}${esc(fullName(p.b))} <small>${isIdeal(p.a,p.b,city)?"un a un logement, l'autre cherche · ":(housIn(p.a,city)==="a"&&housIn(p.b,city)==="a")?"les deux ont un logement · ":""}${p.common?p.common+" sem. en commun":"aucune semaine en commun"} · ${p.covered}/${fw.length} sem. à venir occupées</small> <button class="sec" data-match="${p.a.id}|${p.b.id}|${esc(cityMap[city])}" style="padding:2px 8px">✓ Valider</button></span>`;
   const fresh=pairs.filter(p=>!saved.has(key(p))); const perfect=fresh.filter(p=>!p.common), close=fresh.filter(p=>p.common>0&&p.common<=4);
   $app.innerHTML = header()+`<main>
   <div class="card"><div class="bar"><b>Ville :</b>
@@ -388,8 +400,7 @@ function renderCal(){
 /* ---------- Onglet Matchs : suivi jusqu'au logement ---------- */
 function renderMatches(){
   const byId=Object.fromEntries(people.map(p=>[p.id,p]));
-  const ws=weeks();
-  const commonOf=(a,b,c)=>{const cc=norm(c); return ws.filter(w=>cityAt(a,w)===cc&&cityAt(b,w)===cc).length};
+  const commonOf=(a,b,c)=>{const cc=norm(c); return span(a,b).filter(w=>cityAt(a,w)===cc&&cityAt(b,w)===cc).length};
   const card=p=>p?`<div class="card" style="margin:0"><b>${esc(fullName(p))}</b> <span class="st ${p.status}">${ST[p.status]}</span><br>
     <span class="mut">Logement école :</span> ${HS[p.school_housing]||HS.cherche}<br><span class="mut">Logement entreprise :</span> ${HS[p.company_housing]||HS.cherche}<br>
     <span class="mut">École :</span> ${esc(p.school||"—")} (${esc(p.school_city)})<br><span class="mut">Entreprise :</span> ${esc(p.company_city||"—")}<br>
